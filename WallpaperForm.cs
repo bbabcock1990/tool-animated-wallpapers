@@ -93,15 +93,15 @@ internal sealed class WallpaperForm : Form
 
         AttachToDesktop();
 
-        // Re-attach only if the shell actually detached us (e.g., Explorer restart).
-        // We must NOT re-run the attach on every tick: re-sending the spawn message and
-        // re-parenting an already-attached window causes a visible periodic flash.
+        // Only re-attach when the desktop layer we parented to is actually gone
+        // (Explorer restart). GetParent() is unreliable here: for a top-level window
+        // re-parented under the Windows 11 "raised desktop", it returns 0 even while we
+        // are correctly attached — so using it caused a re-parent every tick, which
+        // produces a periodic GPU-compositor flicker on the WebView2 (DirectComposition)
+        // surface that a screenshot cannot even capture.
         _watchdog.Tick += (_, _) =>
         {
-            IntPtr parent = Native.GetParent(Handle);
-            bool stillAttached = parent != IntPtr.Zero &&
-                                 (parent == _desktopLayer || Native.IsWindow(_desktopLayer));
-            if (!stillAttached)
+            if (!Native.IsWindow(_desktopLayer))
                 AttachToDesktop();
         };
         _watchdog.Start();

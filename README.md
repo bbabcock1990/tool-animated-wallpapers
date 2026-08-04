@@ -57,7 +57,7 @@ Windows 11's modern "raised desktop with layered ShellView" renders the wallpape
 3. The wallpaper form is created with **`WS_EX_LAYERED`** and made fully opaque via `SetLayeredWindowAttributes(alpha=255)`. This is required so DWM composites the WebView2 (DirectComposition) surface correctly *behind the icons* — without it the window renders solid black.
 4. The form is `SetParent`-ed to that WorkerW child and sized to the virtual screen.
 5. On classic (non-raised) layouts it falls back to the sibling-WorkerW technique, then to Progman.
-6. A lightweight watchdog re-attaches the window only if the shell actually detaches it (e.g., Explorer restart). It never re-sends the spawn message or re-parents while already attached — doing so forces a full wallpaper repaint that shows up as a periodic flash.
+6. A lightweight watchdog re-attaches the window only if the desktop layer is destroyed (e.g., Explorer restart). It intentionally does **not** poll `GetParent` — on the raised desktop that returns `0` even while correctly attached, so re-parenting on every tick caused a periodic GPU-compositor flicker on the WebView2 surface (invisible to screenshots, visible to the eye).
 
 Result: full HTML/CSS-animation/JS/Canvas as the live wallpaper, **with desktop icons fully visible on top**.
 
