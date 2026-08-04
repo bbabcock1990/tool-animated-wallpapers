@@ -1,0 +1,29 @@
+/* Shared base styles for the live wallpaper (aurora + particle network + clock).
+   Used by wallpaper.html and any variant (e.g. the calendar overlay build).
+   Font sizes use vmin so text scales by the shorter screen edge and does not
+   explode when a single WebView covers an ultra-wide / spanned canvas. */
+:root { --fg: #eaf2ff; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #05070f; }
+body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }
+canvas { position: fixed; inset: 0; display: block; }
+#aurora   { z-index: 0; filter: blur(2px); }
+#network  { z-index: 1; }
+.vignette {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 42%, transparent 40%, rgba(0,0,0,.55) 100%);
+}
+.clock {
+  position: fixed; z-index: 3; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); text-align: center; user-select: none;
+}
+/* When one WebView spans two side-by-side monitors, center the clock on the
+   LEFT monitor (0-50% of the canvas) instead of the bezel gap in the middle. */
+body.span .clock { right: auto; width: 50%; }
+.time {
+  font-size: 8.5vmin; font-weight: 200; letter-spacing: .02em; line-height: 1;
+  text-shadow: 0 4px 60px rgba(60,130,255,.35);
+}
+.time .sec { font-size: 3vmin; opacity: .55; vertical-align: super; margin-left: .2em; font-weight: 300; }
+.date { margin-top: .5em; font-size: 1.5vmin; font-weight: 300; letter-spacing: .5em;
+        text-transform: uppercase; opacity: .72; }
+.greet { margin-top: 1.4em; font-size: 1.1vmin; letter-spacing: .35em; text-transform: uppercase; opacity: .5; }

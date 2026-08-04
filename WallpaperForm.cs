@@ -13,14 +13,18 @@ internal sealed class WallpaperForm : Form
 {
     private readonly WebView2 _webView = new();
     private readonly string _source;
-    private readonly bool _spanAllMonitors;
+    private readonly Rectangle _targetBounds;
+    private readonly string _userDataSubfolder;
     private readonly System.Windows.Forms.Timer _watchdog = new() { Interval = 3000 };
     private IntPtr _desktopLayer = IntPtr.Zero;
 
-    public WallpaperForm(string source, bool spanAllMonitors)
+    /// <param name="targetBounds">The monitor rectangle (screen coordinates) this window covers.</param>
+    /// <param name="userDataSubfolder">Per-window WebView2 user-data subfolder (must be unique per window in the process).</param>
+    public WallpaperForm(string source, Rectangle targetBounds, string userDataSubfolder)
     {
         _source = source;
-        _spanAllMonitors = spanAllMonitors;
+        _targetBounds = targetBounds;
+        _userDataSubfolder = userDataSubfolder;
 
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -29,11 +33,7 @@ internal sealed class WallpaperForm : Form
         ControlBox = false;
         Text = "HtmlWallpaper";
 
-        Rectangle area = spanAllMonitors
-            ? SystemInformation.VirtualScreen
-            : Screen.PrimaryScreen!.Bounds;
-
-        Bounds = area;
+        Bounds = _targetBounds;
 
         _webView.Dock = DockStyle.Fill;
         _webView.DefaultBackgroundColor = Color.Black;
@@ -59,7 +59,7 @@ internal sealed class WallpaperForm : Form
     {
         string userData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "HtmlWallpaper", "WebView2");
+            "HtmlWallpaper", "WebView2", _userDataSubfolder);
         Directory.CreateDirectory(userData);
 
         // Browser flags tuned for the wallpaper scenario:
@@ -132,13 +132,20 @@ internal sealed class WallpaperForm : Form
         _desktopLayer = desktopLayer;
         Native.SetParent(Handle, desktopLayer);
 
-        // After re-parenting, coordinates are relative to the desktop layer, whose
-        // origin aligns with the primary monitor's top-left (0,0). Re-apply bounds so
-        // monitors positioned left/above primary (negative coords) render correctly.
-        Rectangle area = _spanAllMonitors
-            ? SystemInformation.VirtualScreen
-            : Screen.PrimaryScreen!.Bounds;
-        Location = area.Location;
-        Size = area.Size;
+        // After re-parenting, child coordinates are relative to the desktop layer's
+        // client origin. That origin is NOT necessarily the primary monitor's (0,0):
+        // on multi-monitor setups the WorkerW covers the whole virtual screen, so its
+        // top-left in screen coordinates is the virtual-screen origin (which may be
+        // negative when a monitor sits left of / above primary). Query it directly and
+        // translate this window's target monitor rectangle into that coordinate space,
+        // so each per-monitor window lands on the right physical display.
+        int offsetX = 0, offsetY = 0;
+        if (Native.GetWindowRect(desktopLayer, out Native.RECT wr))
+        {
+            offsetX = wr.Left;
+            offsetY = wr.Top;
+        }
+        Location = new Point(_targetBounds.X - offsetX, _targetBounds.Y - offsetY);
+        Size = _targetBounds.Size;
     }
 }

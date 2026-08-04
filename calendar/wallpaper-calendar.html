@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Aurora Live Wallpaper</title>
-<link rel="stylesheet" href="wallpaper-core.css">
+<title>Aurora + Calendar Live Wallpaper</title>
+<!-- Shared base animation (aurora + particle network + clock). -->
+<link rel="stylesheet" href="../wallpaper-core.css">
 </head>
 <body>
   <canvas id="aurora"></canvas>
@@ -15,6 +16,9 @@
     <div class="greet" id="greet"></div>
   </div>
 
-  <script src="wallpaper-core.js"></script>
+  <script src="../wallpaper-core.js"></script>
+
+  <!-- Outlook "Today" calendar overlay module. Remove this one line to turn it off. -->
+  <script src="calendar-overlay.js"></script>
 </body>
 </html>
