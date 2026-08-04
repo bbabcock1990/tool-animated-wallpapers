@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Wallpaper Demo</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #05060a;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  /* Animated gradient blobs (pure CSS animation) */
+  .blob {
+    position: fixed; border-radius: 50%; filter: blur(60px); opacity: 0.55;
+    mix-blend-mode: screen; animation: drift 18s ease-in-out infinite;
+  }
+  .b1 { width: 46vw; height: 46vw; background: #ff2e88; top: -10vh; left: -8vw; animation-delay: 0s; }
+  .b2 { width: 40vw; height: 40vw; background: #2ea6ff; bottom: -12vh; right: -6vw; animation-delay: -6s; }
+  .b3 { width: 34vw; height: 34vw; background: #7CFF6B; top: 30vh; left: 40vw; animation-delay: -11s; }
+  @keyframes drift {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33%     { transform: translate(6vw,4vh) scale(1.15); }
+    66%     { transform: translate(-5vw,-3vh) scale(0.9); }
+  }
+  #stars { position: fixed; inset: 0; display: block; }
+  .clock {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    color: #f4f6ff; text-align: center; text-shadow: 0 2px 30px rgba(0,0,0,.6);
+    user-select: none;
+  }
+  .time { font-size: 8vw; font-weight: 200; letter-spacing: .04em; }
+  .date { font-size: 1.6vw; opacity: .8; margin-top: .3em; letter-spacing: .3em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <canvas id="stars"></canvas>
+  <div class="clock">
+    <div class="time" id="time">--:--</div>
+    <div class="date" id="date">—</div>
+  </div>
+
+<script>
+  // Canvas particle starfield (JS + Canvas 2D)
+  const cv = document.getElementById('stars');
+  const ctx = cv.getContext('2d');
+  let stars = [];
+  function resize() {
+    cv.width = innerWidth; cv.height = innerHeight;
+    const count = Math.floor((innerWidth * innerHeight) / 6000);
+    stars = Array.from({length: count}, () => ({
+      x: Math.random() * cv.width,
+      y: Math.random() * cv.height,
+      z: Math.random() * 1.5 + 0.3,
+      r: Math.random() * 1.6 + 0.2
+    }));
+  }
+  addEventListener('resize', resize); resize();
+
+  function frame() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (const s of stars) {
+      s.y += s.z * 0.25;
+      if (s.y > cv.height) { s.y = 0; s.x = Math.random() * cv.width; }
+      const tw = 0.5 + 0.5 * Math.sin((Date.now() * 0.002) + s.x);
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255,255,255,${0.3 + tw * 0.5})`;
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+
+  // Live clock (JS)
+  function tick() {
+    const d = new Date();
+    document.getElementById('time').textContent =
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('date').textContent =
+      d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+  tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>

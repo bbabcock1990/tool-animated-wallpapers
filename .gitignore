@@ -1,0 +1,7 @@
+# Build output
+bin/
+obj/
+
+# User-specific
+*.user
+.vs/
