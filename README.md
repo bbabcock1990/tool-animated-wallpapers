@@ -86,6 +86,24 @@ The module injects its own stylesheet (`calendar-overlay.css`) and panel DOM, th
 
 The panel re-reads the data file periodically (cache-busted) **without** a full page reload, so the animation never restarts, and it refreshes immediately after the machine wakes from sleep.
 
+#### Turning the panel on/off
+
+The wallpaper can't receive mouse clicks (clicks pass through to the desktop icons), so the toggle lives outside it. The overlay polls a small flag file (`calendar/overlay-state.js`) and shows/hides the panel within ~2s on every monitor — no reload, no wallpaper swap.
+
+```powershell
+# Command line
+.\calendar\Toggle-Calendar.ps1          # flip
+.\calendar\Toggle-Calendar.ps1 -On
+.\calendar\Toggle-Calendar.ps1 -Off
+
+# System tray icon (checkable "Calendar" item; left-click also toggles)
+.\calendar\Show-CalendarTray.ps1            # run now
+.\calendar\Show-CalendarTray.ps1 -Install   # also start at login
+.\calendar\Show-CalendarTray.ps1 -Uninstall # remove login entry
+```
+
+On Windows 11 a new tray icon starts in the notification-area **overflow** (the `^` chevron) — drag it onto the taskbar to keep it visible. Toggling only shows/hides the panel; it doesn't stop the refresh task (use `Register-CalendarTask.ps1 -Unregister` for that).
+
 ## How it works
 
 Windows 11's modern "raised desktop with layered ShellView" renders the wallpaper differently from older Windows. `Progman` carries `WS_EX_NOREDIRECTIONBITMAP`, `SHELLDLL_DefView` (the icons) is a *layered child* of Progman, and the wallpaper is drawn by a `WorkerW` child of Progman that is z-ordered **under** the icons.

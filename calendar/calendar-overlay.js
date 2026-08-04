@@ -152,10 +152,31 @@
     document.body.appendChild(s);
   }
 
+  /* ---------- On/off state (polled flag file; no page reload) ---------- */
+  // Visibility is driven by window.OVERLAY_STATE.calendar, written by
+  // Toggle-Calendar.ps1 / the tray helper. Polling a tiny local file keeps every
+  // monitor in sync and lets the panel appear/disappear instantly. A missing or
+  // unparseable file is treated as ON so the overlay is visible by default.
+  function applyState() {
+    const cal = document.getElementById('cal');
+    if (!cal) return;
+    const on = !window.OVERLAY_STATE || window.OVERLAY_STATE.calendar !== false;
+    cal.style.display = on ? '' : 'none';
+  }
+  function loadState() {
+    const s = document.createElement('script');
+    s.src = baseUrl + 'overlay-state.js?t=' + Date.now();
+    s.onload = () => { applyState(); s.remove(); };
+    s.onerror = () => { applyState(); s.remove(); };
+    document.body.appendChild(s);
+  }
+
   /* ---------- Boot ---------- */
   injectCss();
   injectPanel();
+  loadState();                                  // initial on/off
   loadData();                                   // initial data
+  setInterval(loadState, 2 * 1000);             // react to toggles (both monitors)
   setInterval(renderCalendar, 60 * 1000);       // advance now/next/past highlighting
   setInterval(loadData, 5 * 60 * 1000);         // pull fresh data written by the task
 
@@ -164,7 +185,7 @@
   let lastTick = Date.now();
   setInterval(() => {
     const now = Date.now();
-    if (now - lastTick > 90 * 1000) loadData();  // clock jumped => was asleep
+    if (now - lastTick > 90 * 1000) { loadState(); loadData(); }  // clock jumped => was asleep
     lastTick = now;
   }, 30 * 1000);
 })();

@@ -10,3 +10,6 @@ obj/
 calendar/calendar-events.js
 calendar/*.log
 calendar/*.err
+
+# Per-user runtime UI state (overlay on/off flag)
+calendar/overlay-state.js
