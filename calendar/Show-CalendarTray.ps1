@@ -96,7 +96,7 @@ Sync-Check
 
 $miCal.Add_Click({
     $desired = -not (Get-State)
-    & $toggle $(if ($desired) { '-On' } else { '-Off' }) | Out-Null
+    if ($desired) { & $toggle -On | Out-Null } else { & $toggle -Off | Out-Null }
     Sync-Check
 }) | Out-Null
 
@@ -105,7 +105,7 @@ $icon.Add_MouseClick({
     param($s, $e)
     if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
         $desired = -not (Get-State)
-        & $toggle $(if ($desired) { '-On' } else { '-Off' }) | Out-Null
+        if ($desired) { & $toggle -On | Out-Null } else { & $toggle -Off | Out-Null }
         Sync-Check
     }
 }) | Out-Null
