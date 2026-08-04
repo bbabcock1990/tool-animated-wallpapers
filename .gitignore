@@ -5,3 +5,14 @@ obj/
 # User-specific
 *.user
 .vs/
+
+# Generated calendar data (contains personal calendar) and logs
+calendar/calendar-events.js
+calendar/*.log
+calendar/*.err
+
+# Per-user runtime UI state (overlay on/off flag)
+calendar/overlay-state.js
+
+# Per-user settings (hotkey combo)
+calendar/settings.json
