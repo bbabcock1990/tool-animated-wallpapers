@@ -62,9 +62,20 @@ internal sealed class WallpaperForm : Form
             "HtmlWallpaper", "WebView2");
         Directory.CreateDirectory(userData);
 
-        // Allow media to autoplay without a user gesture (muted by default).
+        // Browser flags tuned for the wallpaper scenario:
+        //  - autoplay-policy: let media start without a user gesture.
+        //  - CalculateNativeWinOcclusion (disabled): our window is parented under the
+        //    desktop icons, so Chromium's occlusion detection keeps deciding it is
+        //    "hidden" and pausing/resuming painting — that is the periodic flicker.
+        //  - backgrounding/timer-throttling (disabled): keep rendering at full rate
+        //    even though the window is never the foreground window.
         var options = new CoreWebView2EnvironmentOptions(
-            additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required");
+            additionalBrowserArguments:
+                "--autoplay-policy=no-user-gesture-required " +
+                "--disable-features=CalculateNativeWinOcclusion " +
+                "--disable-backgrounding-occluded-windows " +
+                "--disable-renderer-backgrounding " +
+                "--disable-background-timer-throttling");
 
         CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null, userDataFolder: userData, options: options);
