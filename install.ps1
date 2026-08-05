@@ -192,6 +192,12 @@ if ($wantCalendar) {
 
         Write-Step "Scheduling a 15-minute refresh + installing the tray toggle"
         & (Join-Path $InstallDir 'calendar\Register-CalendarTask.ps1')
+        # Start the tray now via the hidden VBS shim so it grabs the single-instance
+        # mutex first; then -Install just creates the login entry and returns at the
+        # mutex guard instead of blocking on the tray's Application.Run message loop.
+        Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') `
+            -ArgumentList "`"$(Join-Path $InstallDir 'calendar\Start-CalendarTray.vbs')`""
+        Start-Sleep -Seconds 2
         & (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1') -Install
 
         $wallpaper = Join-Path $InstallDir 'calendar\wallpaper-calendar.html'
