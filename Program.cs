@@ -78,8 +78,13 @@ internal sealed class MultiFormContext : ApplicationContext
     private readonly string[] _args;
     private readonly List<WallpaperForm> _forms = new();
     private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 1500 };
+    // Safety net: even if a display event is missed (undock/lid-close/monitor
+    // power transitions don't always raise DisplaySettingsChanged), poll the
+    // monitor layout and rebuild when it no longer matches what we drew.
+    private readonly System.Windows.Forms.Timer _reconcile = new() { Interval = 2000 };
     private bool _rebuilding;
     private int _generation;
+    private string _builtSignature = "";
 
     public MultiFormContext(string source, string[] args)
     {
@@ -89,6 +94,11 @@ internal sealed class MultiFormContext : ApplicationContext
         // Coalesce bursts of DisplaySettingsChanged events into a single rebuild.
         _debounce.Tick += (_, _) => { _debounce.Stop(); Rebuild(); };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+
+        // Reconcile the drawn layout against the current monitors on a timer so a
+        // missed display event can't leave a stale (wrong-size / off-screen) wallpaper.
+        _reconcile.Tick += (_, _) => ReconcileLayout();
+        _reconcile.Start();
 
         Build();
     }
@@ -100,10 +110,27 @@ internal sealed class MultiFormContext : ApplicationContext
         _debounce.Start();
     }
 
+    private void ReconcileLayout()
+    {
+        if (_rebuilding) return;
+        string current = Signature(Program.ResolveTargetScreens(_args));
+        if (current != _builtSignature)
+        {
+            // Layout drifted from what we built (e.g. a missed event). Debounce a
+            // rebuild so we settle after Windows finishes updating the display set.
+            _debounce.Stop();
+            _debounce.Start();
+        }
+    }
+
+    private static string Signature(List<Rectangle> targets) =>
+        string.Join(";", targets.Select(r => $"{r.X},{r.Y},{r.Width},{r.Height}"));
+
     private void Build()
     {
         int gen = _generation++;
         List<Rectangle> targets = Program.ResolveTargetScreens(_args);
+        _builtSignature = Signature(targets);
         for (int i = 0; i < targets.Count; i++)
         {
             var form = new WallpaperForm(_source, targets[i], $"g{gen}_mon{i}");
