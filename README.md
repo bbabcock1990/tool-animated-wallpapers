@@ -6,41 +6,90 @@ It hosts **WebView2** (the Edge engine already on Windows 11) inside a full-scre
 
 ![Animated aurora wallpaper](static-wallpaper.png)
 
-## Requirements
+## Install (one command)
 
-- Windows 10/11
-- WebView2 Runtime (preinstalled on Windows 11)
-- .NET 8 SDK (only needed to build)
-
-## Quick start
+Open **Windows PowerShell** and paste:
 
 ```powershell
-# 1. Build
-dotnet build -c Release
-
-# 2. Set an animated wallpaper (bundled example)
-.\Set-Wallpaper.ps1 -Source .\wallpaper.html
-
-# 3. Stop / restore the normal wallpaper
-.\Stop-Wallpaper.ps1
+irm https://raw.githubusercontent.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/main/install.ps1 | iex
 ```
 
-You can point it at any local HTML file or a URL:
+That's it. No cloning, no build tools, no admin. The installer:
+
+- downloads a **self-contained build** (no .NET install required) to `%LOCALAPPDATA%\AnimatedDesktopWallpaper`,
+- installs the **WebView2 runtime** if it's missing (preinstalled on Windows 11),
+- sets the animated wallpaper and **starts it at login**,
+- optionally sets up the **Outlook calendar overlay** — it asks first, and if you say yes it installs Node.js, signs you in to Microsoft 365, and schedules a refresh.
+
+Prefer double-clicking? Download the repo (green **Code ▸ Download ZIP**), unzip, and run **`install.bat`**.
+
+### Uninstall
 
 ```powershell
-.\bin\Release\net8.0-windows\HtmlWallpaper.exe .\wallpaper.html
-.\bin\Release\net8.0-windows\HtmlWallpaper.exe https://example.com
+irm https://raw.githubusercontent.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/main/uninstall.ps1 | iex
+```
+
+Stops the wallpaper, removes the login entry + calendar task/tray, and deletes the install folder.
+
+### Manage it
+
+After install, everything lives in `%LOCALAPPDATA%\AnimatedDesktopWallpaper`:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\AnimatedDesktopWallpaper"
+
+# Change the wallpaper (any local HTML file or a URL)
+& "$dir\Set-Wallpaper.ps1" -Source "$dir\demo.html"
+& "$dir\Set-Wallpaper.ps1" -Source https://example.com
+
+# Stop / restore the normal desktop
+& "$dir\Stop-Wallpaper.ps1"
+
+# Start-at-login on / off
+& "$dir\Enable-Startup.ps1" -Source "$dir\wallpaper.html"
+& "$dir\Disable-Startup.ps1"
 ```
 
 - Renders on **every monitor by default** (one window per display, each correctly positioned); pass `--primary` (or `-Primary`) for the primary monitor only, or `--monitor N` (0-based) to target a single display.
 - **Dynamic multi-monitor**: it watches for display changes (dock/undock, monitor added/removed, resolution or layout changes) and rebuilds the per-monitor windows automatically — no restart needed.
 - Only one instance runs at a time — launching a new one replaces the old.
 
-Run automatically at login:
+### Non-interactive install options
+
+Handy when scripting or when you already know what you want (use `install.bat` or a local `install.ps1`):
 
 ```powershell
-.\Enable-Startup.ps1 -Source .\wallpaper.html
-.\Disable-Startup.ps1     # remove
+.\install.ps1 -Calendar          # set up the calendar overlay, no prompt
+.\install.ps1 -NoCalendar        # skip the calendar overlay, no prompt
+.\install.ps1 -NoAutostart       # don't start at login
+.\install.ps1 -InstallDir "D:\ADW"
+.\install.ps1 -Tag v1.0.0        # install a specific release
+```
+
+## Build from source (optional)
+
+You only need this to develop or customize the engine itself.
+
+**Requirements:** Windows 10/11, WebView2 Runtime (preinstalled on Windows 11), .NET 8 SDK.
+
+```powershell
+# Build
+dotnet build -c Release
+
+# Run against any local HTML file or URL
+.\bin\Release\net8.0-windows\HtmlWallpaper.exe .\wallpaper.html
+.\bin\Release\net8.0-windows\HtmlWallpaper.exe https://example.com
+
+# Or use the helper scripts
+.\Set-Wallpaper.ps1 -Source .\wallpaper.html
+.\Stop-Wallpaper.ps1
+```
+
+Produce the same single-file, self-contained build the installer ships:
+
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
 ## Included examples
