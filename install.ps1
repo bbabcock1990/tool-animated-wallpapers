@@ -5,9 +5,11 @@
 .DESCRIPTION
   Installs a self-contained Windows build (no .NET required), sets the animated
   wallpaper, enables start-at-login, and can optionally enable the Outlook
-  calendar module. The calendar signs in with the Windows account broker (device
-  code fallback), and the running wallpaper hosts the tray + auto-refresh in
-  process — no Node.js, no scheduled task, no separate tray process.
+  calendar module. The calendar can sign in via WorkIQ (reuses your existing
+  Windows M365 sign-in — best for locked-down tenants like microsoft.com) or via
+  the Windows account broker / MSAL (with a device-code fallback). The running
+  wallpaper hosts the tray + auto-refresh in process — no scheduled task and no
+  separate tray process.
 
   Run it with the one-liner (no clone needed):
 
@@ -30,10 +32,16 @@
 .PARAMETER NoAutostart
   Do not create a start-at-login entry.
 
+.PARAMETER CalendarAuth
+  Calendar sign-in method: Auto (WorkIQ then MSAL/WAM), WorkIQ, or Msal.
+  Default when the calendar is enabled non-interactively is Auto.
+
 .EXAMPLE
   .\install.ps1
 .EXAMPLE
   .\install.ps1 -Calendar
+.EXAMPLE
+  .\install.ps1 -Calendar -CalendarAuth WorkIQ
 .EXAMPLE
   .\install.ps1 -NoCalendar -NoAutostart
 #>
@@ -43,6 +51,7 @@ param(
     [string]$Tag,
     [switch]$Calendar,
     [switch]$NoCalendar,
+    [ValidateSet('Auto','WorkIQ','Msal')][string]$CalendarAuth,
     [switch]$NoAutostart
 )
 
@@ -67,6 +76,25 @@ function Ask-YesNo($question, $defaultNo = $true) {
     $ans = Read-Host "$question $suffix"
     if ([string]::IsNullOrWhiteSpace($ans)) { return -not $defaultNo }
     return $ans -match '^(y|yes)$'
+}
+
+# Present a numbered menu and return the chosen value. Non-interactive sessions
+# get the default without prompting.
+function Ask-Choice($question, $options, $default) {
+    if (-not (Test-IsInteractive)) { return $default }
+    Write-Host ""
+    Write-Host "  $question" -ForegroundColor Gray
+    for ($i = 0; $i -lt $options.Count; $i++) {
+        $mark = if ($options[$i].Value -eq $default) { ' (default)' } else { '' }
+        Write-Host ("    {0}) {1}{2}" -f ($i + 1), $options[$i].Label, $mark)
+    }
+    $ans = Read-Host "  Choose 1-$($options.Count)"
+    if ([string]::IsNullOrWhiteSpace($ans)) { return $default }
+    $n = 0
+    if ([int]::TryParse($ans, [ref]$n) -and $n -ge 1 -and $n -le $options.Count) {
+        return $options[$n - 1].Value
+    }
+    return $default
 }
 
 Write-Host ""
@@ -171,19 +199,61 @@ else { $wantCalendar = Ask-YesNo "Set up the Outlook calendar overlay (shows tod
 $wallpaper = Join-Path $InstallDir 'wallpaper.html'
 
 if ($wantCalendar) {
-    Write-Step "Setting up the calendar module (Microsoft 365 sign-in)"
-    # The host owns module setup: `module enable calendar` signs in with MSAL
-    # (Windows broker first, device-code fallback), fetches today's events, and
-    # turns the overlay on. No Node.js, no WorkIQ, no scheduled task, no tray
-    # process — the running wallpaper hosts the tray and refreshes on its own.
+    Write-Step "Setting up the calendar module"
+
+    # Choose the sign-in method. WorkIQ reuses your existing Windows M365 sign-in
+    # through an app that is already approved in locked-down tenants (e.g.
+    # microsoft.com, where generic Graph clients require admin consent). MSAL/WAM
+    # uses the Windows broker directly (with a device-code fallback). Auto tries
+    # WorkIQ first, then MSAL.
+    $auth = if ($CalendarAuth) { $CalendarAuth } else {
+        Ask-Choice "How should the calendar sign in to Microsoft 365?" @(
+            @{ Label = 'Auto - try WorkIQ first, then Windows broker (recommended)'; Value = 'Auto' }
+            @{ Label = 'WorkIQ - use my existing Windows M365 sign-in (needs Node.js; best for microsoft.com)'; Value = 'WorkIQ' }
+            @{ Label = 'Windows broker / MSAL only (no Node.js)'; Value = 'Msal' }
+        ) 'Auto'
+    }
+    Write-Ok "Sign-in method: $auth"
+
+    # For the WorkIQ path, make sure Node.js is present and WorkIQ has a cached
+    # sign-in before we ask the module to fetch. (Auto still falls back to MSAL if
+    # any of this is unavailable, so failures here are non-fatal.)
+    if ($auth -eq 'WorkIQ' -or $auth -eq 'Auto') {
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+            Write-Warn2 "Node.js not found - installing (via winget)..."
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                try {
+                    winget install --id OpenJS.NodeJS.LTS -e --silent `
+                        --accept-package-agreements --accept-source-agreements | Out-Null
+                } catch { }
+                $env:PATH = (@($env:PATH,
+                    [Environment]::GetEnvironmentVariable('PATH','Machine'),
+                    [Environment]::GetEnvironmentVariable('PATH','User')) | Where-Object { $_ }) -join ';'
+            }
+        }
+        if (Get-Command node -ErrorAction SilentlyContinue) {
+            Write-Step "Signing in to Microsoft 365 via WorkIQ (a window may open)"
+            try { npx -y '@microsoft/workiq@latest' accept-eula 2>$null | Out-Null } catch { }
+            try { npx -y '@microsoft/workiq@latest' auth login } catch { Write-Warn2 "WorkIQ sign-in did not complete; Auto will fall back to the Windows broker." }
+        } elseif ($auth -eq 'WorkIQ') {
+            Write-Warn2 "Node.js is unavailable, so WorkIQ can't run. Falling back to the Windows broker (MSAL)."
+            $auth = 'Msal'
+        }
+    }
+
+    # The host owns module setup: `module enable calendar --auth <method>` fetches
+    # today's events (WorkIQ and/or MSAL per the method), turns the overlay on, and
+    # schedules the in-process 15-minute refresh. No scheduled task, no separate
+    # tray process — the running wallpaper hosts the tray and refreshes on its own.
     # HtmlWallpaper.exe is a GUI (WinExe) app, so PowerShell's call operator does
-    # NOT wait for it; use Start-Process -Wait -NoNewWindow so the installer
-    # blocks until sign-in completes and shares this console (device-code prompt
-    # and progress stay visible; the WAM dialog can parent to it).
-    $cal = Start-Process -FilePath $exe -ArgumentList 'module','enable','calendar' `
+    # NOT wait for it; use Start-Process -Wait -NoNewWindow so the installer blocks
+    # until sign-in completes and shares this console (device-code prompt/progress
+    # stay visible; the WAM dialog can parent to it).
+    $cal = Start-Process -FilePath $exe `
+        -ArgumentList 'module','enable','calendar','--auth',$auth.ToLower() `
         -WorkingDirectory $InstallDir -NoNewWindow -Wait -PassThru
     if ($cal.ExitCode -eq 0) { Write-Ok "Calendar module enabled." }
-    else { Write-Warn2 "Calendar sign-in didn't complete. Enable it later with:  `"$exe`" module enable calendar" }
+    else { Write-Warn2 "Calendar sign-in didn't complete. Enable it later with:  `"$exe`" module enable calendar --auth $($auth.ToLower())" }
 }
 
 # ---- Launch the wallpaper --------------------------------------------------

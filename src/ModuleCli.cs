@@ -37,8 +37,9 @@ internal static class ModuleCli
                 return 0;
 
             case "enable":
-                if (id is null) { Console.WriteLine("Usage: module enable <id>"); return 2; }
-                return UiRunner.Run(h => service.EnableAsync(id, interactive: true, h, Console.Out));
+                if (id is null) { Console.WriteLine("Usage: module enable <id> [--auth workiq|msal|auto]"); return 2; }
+                string? authMethod = ParseAuth(sub);
+                return UiRunner.Run(h => service.EnableAsync(id, interactive: true, h, Console.Out, authMethod));
 
             case "disable":
                 if (id is null) { Console.WriteLine("Usage: module disable <id>"); return 2; }
@@ -54,14 +55,29 @@ internal static class ModuleCli
 
             default:
                 Console.WriteLine("HtmlWallpaper module commands:");
-                Console.WriteLine("  module list                 List installed modules and their state");
-                Console.WriteLine("  module enable <id>          Sign in / refresh, then turn a module on");
-                Console.WriteLine("  module disable <id>         Turn a module off");
-                Console.WriteLine("  module refresh <id>         Refresh a module's data now");
-                Console.WriteLine("  module add <folder-path>    Install a module folder, then enable it");
-                Console.WriteLine("  module registry             Rebuild modules/registry.js");
+                Console.WriteLine("  module list                        List installed modules and their state");
+                Console.WriteLine("  module enable <id> [--auth <m>]    Sign in / refresh, then turn a module on");
+                Console.WriteLine("                                     calendar --auth: workiq | msal | auto (default)");
+                Console.WriteLine("  module disable <id>                Turn a module off");
+                Console.WriteLine("  module refresh <id>                Refresh a module's data now");
+                Console.WriteLine("  module add <folder-path>           Install a module folder, then enable it");
+                Console.WriteLine("  module registry                    Rebuild modules/registry.js");
                 return verb == "help" ? 0 : 2;
         }
+    }
+
+    /// <summary>Parse an optional "--auth &lt;method&gt;" (or "--auth=&lt;method&gt;") flag.</summary>
+    private static string? ParseAuth(string[] sub)
+    {
+        for (int i = 0; i < sub.Length; i++)
+        {
+            string a = sub[i];
+            if (a.StartsWith("--auth=", StringComparison.OrdinalIgnoreCase))
+                return a.Substring("--auth=".Length);
+            if (string.Equals(a, "--auth", StringComparison.OrdinalIgnoreCase) && i + 1 < sub.Length)
+                return sub[i + 1];
+        }
+        return null;
     }
 
     private static int CmdList(ModuleService service)
@@ -119,15 +135,32 @@ internal static class UiRunner
 
         int rc = 1;
         var ctx = new ApplicationContext();
+
+        // WAM anchors its sign-in dialog to this window and rejects an
+        // off-screen / never-shown handle with a generic broker error
+        // (0xcaa90019). So show a real, centered, top-most window while signing
+        // in — it doubles as user-visible progress.
         var owner = new Form
         {
-            ShowInTaskbar = false,
-            FormBorderStyle = FormBorderStyle.FixedToolWindow,
-            StartPosition = FormStartPosition.Manual,
-            Location = new System.Drawing.Point(-4000, -4000),
-            Size = new System.Drawing.Size(1, 1),
+            Text = "HtmlWallpaper — Microsoft 365 sign-in",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = true,
+            TopMost = true,
+            ClientSize = new System.Drawing.Size(380, 90),
         };
-        owner.CreateControl();
+        owner.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
+            Text = "Signing you in to Microsoft 365…\r\nA sign-in window may open.",
+        });
+        owner.Load += (_, _) => { owner.Activate(); };
+        owner.Show();
+        owner.Activate();
+        Application.DoEvents();
         IntPtr handle = owner.Handle;
 
         var sync = new WindowsFormsSynchronizationContext();

@@ -19,10 +19,19 @@ internal sealed class ModuleService
     public bool IsEnabled(string id) => _registry.IsEnabled(id);
 
     /// <summary>Enable a module: refresh its data once (if it has a refresher), then mark it on.</summary>
-    public async Task<bool> EnableAsync(string id, bool interactive, IntPtr parentWindow, TextWriter log)
+    public async Task<bool> EnableAsync(string id, bool interactive, IntPtr parentWindow, TextWriter log, string? authMethod = null)
     {
         ModuleManifest? m = _registry.Find(id);
         if (m is null) { log.WriteLine($"Module '{id}' not found under modules/."); return false; }
+
+        // Persist a chosen sign-in method (calendar) before the first refresh so
+        // both the interactive enable and the unattended scheduler use it.
+        if (!string.IsNullOrWhiteSpace(authMethod) &&
+            string.Equals(m.Refresh?.Builtin, "calendar", StringComparison.OrdinalIgnoreCase))
+        {
+            try { CalendarRefresher.SaveAuthMethod(m, authMethod!); }
+            catch (Exception ex) { log.WriteLine($"Calendar: could not save auth method: {ex.Message}"); }
+        }
 
         if (m.Refresh is not null)
         {

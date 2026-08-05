@@ -13,6 +13,7 @@
     "builtin": "calendar"
   },
   "settings": {
+    "authMethod": "auto",
     "clientId": "",
     "tenant": "",
     "scopes": []

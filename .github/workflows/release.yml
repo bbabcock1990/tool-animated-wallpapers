@@ -53,7 +53,7 @@ jobs:
           Copy-Item modules $stage -Recurse
           # Do not ship any generated per-user state, fetched data, or tokens.
           Get-ChildItem (Join-Path $stage "modules") -Recurse -Include `
-            data.js,registry.js,state.json,calendar-token.bin,*.log,*.err |
+            data.js,registry.js,state.json,config.json,calendar-token.bin,*.log,*.err |
             Remove-Item -Force -ErrorAction SilentlyContinue
           Remove-Item (Join-Path $stage "modules/state.json") -ErrorAction SilentlyContinue
           Compress-Archive -Path "$stage/*" -DestinationPath "AnimatedDesktopWallpaper-win-x64.zip" -Force

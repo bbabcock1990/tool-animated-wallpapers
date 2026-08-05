@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -10,69 +11,188 @@ using Microsoft.Identity.Client.Extensions.Msal;
 namespace HtmlWallpaper.Modules;
 
 /// <summary>
-/// Built-in data refresher for the calendar module. Signs in to Microsoft 365
-/// with MSAL — using the Windows broker (WAM) first and falling back to the
-/// device-code flow — then reads today's events from Microsoft Graph and writes
-/// <c>modules/calendar/data.js</c> for the overlay to render.
+/// Built-in data refresher for the calendar module. Reads today's events from
+/// Microsoft Graph and writes <c>modules/calendar/data.js</c> for the overlay.
+///
+/// Two sign-in providers are supported and chosen by the module's auth method
+/// (per-user <c>config.json</c> → manifest <c>settings.authMethod</c> → "auto"):
+///   • <b>workiq</b> — the WorkIQ CLI (<c>npx @microsoft/workiq call-function</c>),
+///     which reuses your existing Windows/WAM M365 sign-in through an app
+///     registration that is already approved in locked-down tenants (e.g.
+///     microsoft.com, where generic Graph clients need admin consent).
+///   • <b>msal</b> — MSAL.NET: the Windows broker (WAM) first, then device code,
+///     with a DPAPI token cache for silent background refresh.
+/// "auto" tries WorkIQ first and falls back to MSAL.
 /// </summary>
 internal sealed class CalendarRefresher
 {
-    // Public client defaults. Overridable per-install via the calendar module's
-    // settings ("clientId"/"tenant"/"scopes") for tenants that require a
-    // specific approved app registration.
+    // Public client defaults for the MSAL provider. Overridable per-install via
+    // the calendar module's settings ("clientId"/"tenant"/"scopes").
     private const string DefaultClientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"; // Microsoft Graph PowerShell
     private const string DefaultTenant = "organizations";
     private static readonly string[] DefaultScopes = { "Calendars.Read" };
 
+    private readonly ModuleManifest _module;
     private readonly string _clientId;
     private readonly string _tenant;
     private readonly string[] _scopes;
     private readonly string _cacheDir;
+    private readonly string _authMethod;
 
     public CalendarRefresher(ModuleManifest module)
     {
+        _module = module;
         _cacheDir = module.Dir;
         _clientId = SettingString(module, "clientId") ?? DefaultClientId;
         _tenant = SettingString(module, "tenant") ?? DefaultTenant;
         string[]? scopes = SettingStringArray(module, "scopes");
         _scopes = (scopes is { Length: > 0 }) ? scopes : DefaultScopes;
+        _authMethod = ResolveAuthMethod(module);
     }
 
     /// <summary>
-    /// Acquire a token and refresh the calendar data file.
+    /// Acquire events (via the configured provider order) and refresh data.js.
     /// </summary>
-    /// <param name="interactive">Allow an interactive sign-in (WAM window / device code). Use false for the unattended timer.</param>
-    /// <param name="parentWindow">HWND to parent the WAM dialog to (interactive only).</param>
+    /// <param name="interactive">Allow an interactive sign-in (WAM window / device code / WorkIQ login). False for the unattended timer.</param>
+    /// <param name="parentWindow">HWND to parent the WAM dialog to (interactive MSAL only).</param>
     public async Task<bool> RefreshAsync(bool interactive, IntPtr parentWindow, TextWriter log)
+    {
+        (string start, string end) = TodayWindow();
+
+        string[] order = _authMethod switch
+        {
+            "workiq" => new[] { "workiq" },
+            "msal" or "wam" or "graph" => new[] { "msal" },
+            _ => new[] { "workiq", "msal" }, // auto
+        };
+
+        List<CalEvent>? events = null;
+        string? used = null;
+        foreach (string provider in order)
+        {
+            try
+            {
+                events = provider == "workiq"
+                    ? await FetchViaWorkIqAsync(start, end, log)
+                    : await FetchViaMsalAsync(start, end, interactive, parentWindow, log);
+                if (events is not null) { used = provider; break; }
+            }
+            catch (Exception ex)
+            {
+                log.WriteLine($"Calendar: '{provider}' sign-in failed: {ex.Message}");
+            }
+        }
+
+        if (events is null)
+        {
+            log.WriteLine(interactive
+                ? "Calendar: no sign-in method succeeded. Nothing was changed."
+                : "Calendar: no cached sign-in; run 'HtmlWallpaper.exe module enable calendar' to sign in.");
+            return false;
+        }
+
+        WriteDataJs(events);
+        log.WriteLine($"Calendar: wrote {events.Count} event(s) via {used}.");
+        return true;
+    }
+
+    // ---- Provider: WorkIQ CLI --------------------------------------------------
+
+    private async Task<List<CalEvent>> FetchViaWorkIqAsync(string start, string end, TextWriter log)
+    {
+        string path =
+            "/me/calendarView" +
+            $"?startDateTime={start}&endDateTime={end}" +
+            "&$select=subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,showAs" +
+            "&$orderby=start/dateTime&$top=100";
+
+        log.WriteLine("Calendar: fetching via WorkIQ (uses your existing Windows M365 sign-in)...");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c npx -y @microsoft/workiq@latest call-function -u \"{path}\"",
+            WorkingDirectory = _cacheDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        // A login/unattended session may not inherit the interactive PATH, so npx
+        // could be missing. Rehydrate PATH from the registry (Machine + User).
+        RehydratePath(psi);
+
+        using Process p = Process.Start(psi) ?? throw new InvalidOperationException("could not start npx (is Node.js installed?)");
+        Task<string> outTask = p.StandardOutput.ReadToEndAsync();
+        Task<string> errTask = p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        string outText = await outTask;
+        string errText = await errTask;
+
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"WorkIQ CLI exit {p.ExitCode}. {Truncate(errText.Trim(), 300)}");
+
+        JsonElement value = ExtractValueArray(outText);
+        return ParseValue(value);
+    }
+
+    /// <summary>Pull the Graph <c>value</c> array out of WorkIQ's stdout, which may
+    /// carry log noise around the JSON and may wrap it under a <c>data</c> node.</summary>
+    private static JsonElement ExtractValueArray(string stdout)
+    {
+        int first = stdout.IndexOf('{');
+        int last = stdout.LastIndexOf('}');
+        if (first < 0 || last <= first)
+            throw new InvalidOperationException("WorkIQ returned no JSON.");
+        string json = stdout.Substring(first, last - first + 1);
+
+        using var doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        JsonElement node = root;
+        if (node.ValueKind == JsonValueKind.Object && node.TryGetProperty("data", out JsonElement data))
+            node = data;
+        if (node.ValueKind == JsonValueKind.Object && node.TryGetProperty("value", out JsonElement value))
+            return value.Clone();
+        if (node.ValueKind == JsonValueKind.Array)
+            return node.Clone();
+        throw new InvalidOperationException("WorkIQ response had no events array.");
+    }
+
+    // ---- Provider: MSAL.NET (WAM broker + device code) -------------------------
+
+    private async Task<List<CalEvent>?> FetchViaMsalAsync(string start, string end, bool interactive, IntPtr parentWindow, TextWriter log)
     {
         IPublicClientApplication app = await BuildAppAsync();
 
         string? token = await GetTokenSilentAsync(app, log);
         if (token is null && interactive)
             token = await GetTokenInteractiveAsync(app, parentWindow, log);
-
         if (token is null)
-        {
-            log.WriteLine(interactive
-                ? "Calendar: sign-in did not complete."
-                : "Calendar: no cached sign-in; run 'HtmlWallpaper.exe module enable calendar' to sign in.");
-            return false;
-        }
+            return null; // let the caller fall through / report
 
-        List<CalEvent> events = await FetchTodayAsync(token, log);
-        WriteDataJs(events);
-        log.WriteLine($"Calendar: wrote {events.Count} event(s).");
-        return true;
+        JsonElement value = await GraphGetValueAsync(token, start, end, log);
+        return ParseValue(value);
     }
 
     private async Task<IPublicClientApplication> BuildAppAsync()
     {
-        IPublicClientApplication app = PublicClientApplicationBuilder
+        PublicClientApplicationBuilder builder = PublicClientApplicationBuilder
             .Create(_clientId)
             .WithAuthority($"https://login.microsoftonline.com/{_tenant}")
             .WithDefaultRedirectUri()
-            .WithBroker(new BrokerOptions(BrokerOptions.OperatingSystems.Windows))
-            .Build();
+            .WithBroker(new BrokerOptions(BrokerOptions.OperatingSystems.Windows));
+
+        // Opt-in verbose diagnostics (incl. PII) for troubleshooting broker
+        // failures: set HTMLWP_MSAL_DEBUG=1. Off by default so tokens/PII are
+        // never logged in normal use.
+        if (Environment.GetEnvironmentVariable("HTMLWP_MSAL_DEBUG") == "1")
+        {
+            builder = builder.WithLogging(
+                (level, message, _) => Console.Error.WriteLine($"[MSAL {level}] {message}"),
+                LogLevel.Verbose, enablePiiLogging: true, enableDefaultPlatformLogging: false);
+        }
+
+        IPublicClientApplication app = builder.Build();
 
         // Persist tokens across runs in a DPAPI-encrypted cache next to the module
         // so the unattended timer can refresh silently after the first sign-in.
@@ -146,17 +266,9 @@ internal sealed class CalendarRefresher
         }
     }
 
-    private async Task<List<CalEvent>> FetchTodayAsync(string token, TextWriter log)
+    private async Task<JsonElement> GraphGetValueAsync(string token, string start, string end, TextWriter log)
     {
-        var results = new List<CalEvent>();
-
-        DateTime startLocal = DateTime.Today;
-        DateTime endLocal = startLocal.AddDays(1);
         string tz = TimeZoneInfo.Local.Id; // Graph accepts Windows tz IDs
-
-        string start = startLocal.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
-        string end = endLocal.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
-
         string url =
             "https://graph.microsoft.com/v1.0/me/calendarView" +
             $"?startDateTime={start}&endDateTime={end}" +
@@ -171,21 +283,37 @@ internal sealed class CalendarRefresher
         using HttpResponseMessage resp = await http.SendAsync(req);
         string body = await resp.Content.ReadAsStringAsync();
         if (!resp.IsSuccessStatusCode)
-        {
-            log.WriteLine($"Calendar: Graph returned {(int)resp.StatusCode}. {Truncate(body, 300)}");
-            return results;
-        }
+            throw new InvalidOperationException($"Graph returned {(int)resp.StatusCode}. {Truncate(body, 300)}");
 
         using JsonDocument doc = JsonDocument.Parse(body);
-        if (!doc.RootElement.TryGetProperty("value", out JsonElement value)) return results;
+        if (!doc.RootElement.TryGetProperty("value", out JsonElement value))
+            return JsonDocument.Parse("[]").RootElement.Clone();
+        return value.Clone();
+    }
+
+    // ---- Shared parsing --------------------------------------------------------
+
+    private static (string start, string end) TodayWindow()
+    {
+        DateTime startLocal = DateTime.Today;
+        DateTime endLocal = startLocal.AddDays(1);
+        string start = startLocal.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+        string end = endLocal.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+        return (start, end);
+    }
+
+    private static List<CalEvent> ParseValue(JsonElement value)
+    {
+        var results = new List<CalEvent>();
+        if (value.ValueKind != JsonValueKind.Array) return results;
 
         foreach (JsonElement e in value.EnumerateArray())
         {
             results.Add(new CalEvent
             {
                 Subject = Str(e, "subject") ?? "(no subject)",
-                Start = Nested(e, "start", "dateTime"),
-                End = Nested(e, "end", "dateTime"),
+                Start = NormalizeGraphTime(e, "start"),
+                End = NormalizeGraphTime(e, "end"),
                 IsAllDay = Bool(e, "isAllDay"),
                 IsCancelled = Bool(e, "isCancelled"),
                 IsOnline = Bool(e, "isOnlineMeeting"),
@@ -194,6 +322,38 @@ internal sealed class CalendarRefresher
             });
         }
         return results;
+    }
+
+    /// <summary>
+    /// Graph returns event times as a naive <c>dateTime</c> plus a sibling
+    /// <c>timeZone</c> (Windows or "UTC"), which differs by provider (MSAL asks for
+    /// local time; WorkIQ returns UTC). Combine them into an absolute ISO-8601
+    /// string with offset so the browser's <c>new Date()</c> always renders the
+    /// correct local time regardless of which provider produced the data.
+    /// </summary>
+    private static string? NormalizeGraphTime(JsonElement e, string prop)
+    {
+        if (!e.TryGetProperty(prop, out JsonElement p) || p.ValueKind != JsonValueKind.Object) return null;
+        string? dt = p.TryGetProperty("dateTime", out JsonElement d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+        string? tz = p.TryGetProperty("timeZone", out JsonElement z) && z.ValueKind == JsonValueKind.String ? z.GetString() : null;
+        if (string.IsNullOrWhiteSpace(dt)) return null;
+
+        if (!DateTime.TryParse(dt, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime naive))
+            return dt; // hand back the raw string; better than dropping the event time
+
+        naive = DateTime.SpecifyKind(naive, DateTimeKind.Unspecified);
+        TimeZoneInfo tzi;
+        try
+        {
+            tzi = string.IsNullOrWhiteSpace(tz) || string.Equals(tz, "UTC", StringComparison.OrdinalIgnoreCase)
+                ? TimeZoneInfo.Utc
+                : TimeZoneInfo.FindSystemTimeZoneById(tz);
+        }
+        catch { tzi = TimeZoneInfo.Utc; }
+
+        TimeSpan offset = tzi.GetUtcOffset(naive);
+        var dto = new DateTimeOffset(naive, offset);
+        return dto.ToString("o", CultureInfo.InvariantCulture);
     }
 
     private void WriteDataJs(List<CalEvent> events)
@@ -213,7 +373,51 @@ internal sealed class CalendarRefresher
         File.WriteAllText(Path.Combine(_cacheDir, "data.js"), js, new UTF8Encoding(false));
     }
 
-    // ---- small JSON helpers ----
+    // ---- helpers ---------------------------------------------------------------
+
+    private static string ResolveAuthMethod(ModuleManifest m)
+    {
+        // Per-user override (written by `module enable calendar --auth <method>`)
+        // wins over the shipped manifest default.
+        try
+        {
+            string cfg = Path.Combine(m.Dir, "config.json");
+            if (File.Exists(cfg))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("authMethod", out JsonElement a) &&
+                    a.ValueKind == JsonValueKind.String)
+                {
+                    string? v = a.GetString();
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim().ToLowerInvariant();
+                }
+            }
+        }
+        catch { /* fall through to manifest / default */ }
+
+        return (SettingString(m, "authMethod") ?? "auto").ToLowerInvariant();
+    }
+
+    /// <summary>Persist the chosen auth method so the unattended scheduler reuses it.</summary>
+    public static void SaveAuthMethod(ModuleManifest m, string method)
+    {
+        string norm = (method ?? "auto").Trim().ToLowerInvariant();
+        string cfg = Path.Combine(m.Dir, "config.json");
+        var obj = new Dictionary<string, object?> { ["authMethod"] = norm };
+        File.WriteAllText(cfg, JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false));
+    }
+
+    private static void RehydratePath(ProcessStartInfo psi)
+    {
+        string? machine = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine);
+        string? user = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User);
+        string current = psi.Environment.TryGetValue("PATH", out string? cur) ? cur ?? "" : Environment.GetEnvironmentVariable("PATH") ?? "";
+        string combined = string.Join(";", new[] { current, machine, user }.Where(s => !string.IsNullOrEmpty(s)));
+        psi.Environment["PATH"] = combined;
+    }
+
     private static string? Str(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 

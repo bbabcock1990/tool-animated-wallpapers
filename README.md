@@ -19,7 +19,7 @@ That's it. No cloning, no build tools, no admin. The installer:
 - downloads a **self-contained build** (no .NET install required) to `%LOCALAPPDATA%\AnimatedDesktopWallpaper`,
 - installs the **WebView2 runtime** if it's missing (preinstalled on Windows 11),
 - sets the animated wallpaper and **starts it at login**,
-- optionally enables the **Outlook calendar module** — it asks first, and if you say yes it signs you in to Microsoft 365 (Windows account broker, with a device-code fallback) and refreshes it automatically in the background.
+- optionally enables the **Outlook calendar module** — it asks first, and if you say yes it lets you choose a sign-in method (WorkIQ, which reuses your existing Windows M365 sign-in, or the Windows account broker/MSAL), then refreshes it automatically in the background.
 
 Prefer double-clicking? Download the repo (green **Code ▸ Download ZIP**), unzip, and run **`install.bat`**.
 
@@ -160,14 +160,23 @@ Default state for a freshly dropped-in module is **disabled** — nothing happen
 The first module: a top-right **"Today"** panel with your Outlook/M365 calendar — all-day chips, timed events with start/end, online/in-person dots, `NOW` / `NEXT` / `TENTATIVE` pills, past events dimmed.
 
 ```powershell
-HtmlWallpaper.exe module enable calendar
+HtmlWallpaper.exe module enable calendar                 # Auto (recommended)
+HtmlWallpaper.exe module enable calendar --auth workiq   # WorkIQ only
+HtmlWallpaper.exe module enable calendar --auth msal      # Windows broker / MSAL only
 ```
 
-Sign-in and data fetch are built into the host (MSAL.NET). It signs in with the **Windows account broker (WAM)** first, falling back to **device-code** sign-in, then caches the token (DPAPI, per-user, `modules/calendar/calendar-token.bin`) so the 15-minute background refresh stays silent. Data is fetched from Microsoft Graph (`me/calendarView`) and written to `modules/calendar/data.js` (`window.CALENDAR_DATA`, git-ignored — it's your personal calendar). Toggle it any time with the tray item or the global hotkey (default **Ctrl+Alt+C**); change the hotkey in the tray's **Settings…** dialog.
+**Two sign-in methods** are supported, and the installer lets you pick one:
 
-You can point the calendar at an admin-consented app or restrict the tenant via the manifest `settings` (`clientId`, `tenant`, `scopes`).
+| Method | How it signs in | Best for |
+| --- | --- | --- |
+| **WorkIQ** | Runs the [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq) CLI (`npx @microsoft/workiq call-function`), reusing your existing Windows/WAM M365 sign-in through an app registration that's **already admin-approved** in locked-down tenants. Needs Node.js. | **microsoft.com** and other tenants where generic Graph clients require admin consent |
+| **MSAL** | MSAL.NET: the **Windows broker (WAM)** first, then **device-code**, with a DPAPI token cache (`modules/calendar/calendar-token.bin`) for silent refresh. No Node.js. | Tenants where the Graph client is consentable, or machines without Node.js |
 
-> **Note:** some tenants enforce a Conditional Access **token protection** policy that *requires* the WAM broker — there, only the Windows-broker sign-in works and the device-code fallback is blocked by design. Enable the module interactively once (so the WAM dialog can appear) before relying on the silent background refresh.
+**Auto** (the default) tries **WorkIQ first, then MSAL** — so it works out of the box on locked-down tenants but still functions without Node.js. Your choice is saved to `modules/calendar/config.json` (git-ignored) so the 15-minute background refresh reuses it. Events come from Microsoft Graph (`me/calendarView`) and are written to `modules/calendar/data.js` (`window.CALENDAR_DATA`, git-ignored — it's your personal calendar). Toggle the panel any time with the tray item or the global hotkey (default **Ctrl+Alt+C**); change the hotkey in the tray's **Settings…** dialog.
+
+For the MSAL method you can point at an admin-consented app or restrict the tenant via the manifest `settings` (`clientId`, `tenant`, `scopes`).
+
+> **Note — locked-down tenants:** if your tenant disables user consent (e.g. **microsoft.com**), the generic *Microsoft Graph Command Line Tools* client used by MSAL shows **"Need admin approval"** and can't sign in until an admin consents to it. Use the **WorkIQ** method (or **Auto**), which authenticates through WorkIQ's already-approved app. Token-protection Conditional Access additionally blocks the MSAL **device-code** fallback (WAM still works there).
 
 Windows 11's modern "raised desktop with layered ShellView" renders the wallpaper differently from older Windows. `Progman` carries `WS_EX_NOREDIRECTIONBITMAP`, `SHELLDLL_DefView` (the icons) is a *layered child* of Progman, and the wallpaper is drawn by a `WorkerW` child of Progman that is z-ordered **under** the icons.
 

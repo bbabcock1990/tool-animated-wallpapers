@@ -9,6 +9,7 @@ obj/
 # Generated per-module runtime state and fetched data (may contain personal info)
 modules/state.json
 modules/registry.js
+modules/*/config.json
 modules/*/data.js
 modules/*/calendar-token.bin*
 modules/**/*.log
