@@ -2,9 +2,11 @@
 .SYNOPSIS
   Uninstall Animated Desktop Wallpapers Helper.
 .DESCRIPTION
-  Stops the wallpaper, removes the start-at-login entry, tears down the calendar
-  refresh task + tray, and deletes the install folder. Restores the normal
-  Windows desktop.
+  Stops the wallpaper, removes the start-at-login entry, cleans up any legacy
+  calendar refresh task + tray (from older installs), and deletes the install
+  folder. Restores the normal Windows desktop. The current build hosts the tray
+  and data refresh inside HtmlWallpaper.exe, so stopping that one process already
+  removes the tray.
 
   Run from anywhere:
     irm https://raw.githubusercontent.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/main/uninstall.ps1 | iex
@@ -44,26 +46,22 @@ if (Test-Path (Join-Path $InstallDir 'Disable-Startup.ps1')) {
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'HtmlWallpaper.lnk') -Force
 Write-Ok "Removed."
 
-# Tear down calendar task + tray, if present.
-if (Test-Path (Join-Path $InstallDir 'calendar')) {
-    Write-Step "Removing the calendar refresh task and tray"
-    if (Test-Path (Join-Path $InstallDir 'calendar\Register-CalendarTask.ps1')) {
-        & (Join-Path $InstallDir 'calendar\Register-CalendarTask.ps1') -Unregister
-    }
-    if (Test-Path (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1')) {
-        & (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1') -Uninstall
-    }
-    # Terminate the live tray host. It runs as a powershell/pwsh/wscript process
-    # whose command line references this install's tray scripts. The -Uninstall
-    # call above only removes the startup shortcut; it does NOT stop the running
-    # process, so without this the tray icon survives an uninstall (zombie).
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name -in 'powershell.exe','pwsh.exe','wscript.exe' -and $_.CommandLine -and
-        $_.CommandLine -like "*$InstallDir*" -and
-        ($_.CommandLine -like '*Show-CalendarTray*' -or $_.CommandLine -like '*Start-CalendarTray*')
-    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Write-Ok "Removed."
+# Tear down any legacy calendar refresh task + tray from older (pre-module) installs.
+Write-Step "Removing legacy calendar task/tray (if any)"
+foreach ($tn in 'HtmlWallpaper-CalendarRefresh','HtmlWallpaper-CalendarRefresh-Logon') {
+    schtasks.exe /Delete /TN $tn /F 2>&1 | Out-Null
 }
+foreach ($ln in 'HtmlWallpaper-CalendarTray.lnk','HtmlWallpaper-ModuleTray.lnk') {
+    Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) $ln) -Force
+}
+# Kill any leftover legacy tray host process (separate powershell/wscript). The
+# current design hosts the tray inside HtmlWallpaper.exe (already stopped above),
+# so this only matters when upgrading from an older install.
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -in 'powershell.exe','pwsh.exe','wscript.exe' -and $_.CommandLine -and
+    ($_.CommandLine -like '*Show-CalendarTray*' -or $_.CommandLine -like '*Start-CalendarTray*' -or $_.CommandLine -like '*Show-ModuleTray*')
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Write-Ok "Done."
 
 # Delete the install folder.
 if (-not $KeepFiles) {

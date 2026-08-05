@@ -1,0 +1,20 @@
+{
+  "id": "calendar",
+  "name": "Outlook Calendar",
+  "description": "Shows today's Outlook/M365 meetings in a top-right panel.",
+  "assets": {
+    "css": ["overlay.css"],
+    "js": ["overlay.js"]
+  },
+  "toggle": true,
+  "hotkeyDefault": "Ctrl+Alt+C",
+  "refresh": {
+    "everyMinutes": 15,
+    "builtin": "calendar"
+  },
+  "settings": {
+    "clientId": "",
+    "tenant": "",
+    "scopes": []
+  }
+}

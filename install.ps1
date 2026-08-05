@@ -4,8 +4,10 @@
 
 .DESCRIPTION
   Installs a self-contained Windows build (no .NET required), sets the animated
-  wallpaper, enables start-at-login, and can optionally wire up the Outlook
-  calendar overlay (Node.js + WorkIQ M365 sign-in + refresh task + tray).
+  wallpaper, enables start-at-login, and can optionally enable the Outlook
+  calendar module. The calendar signs in with the Windows account broker (device
+  code fallback), and the running wallpaper hosts the tray + auto-refresh in
+  process — no Node.js, no scheduled task, no separate tray process.
 
   Run it with the one-liner (no clone needed):
 
@@ -169,66 +171,19 @@ else { $wantCalendar = Ask-YesNo "Set up the Outlook calendar overlay (shows tod
 $wallpaper = Join-Path $InstallDir 'wallpaper.html'
 
 if ($wantCalendar) {
-    Write-Step "Setting up the calendar overlay"
-
-    # Primary path: the WorkIQ CLI, which signs in via the Windows WAM broker.
-    # Best-effort - if Node.js or WAM isn't available/working, we fall back to a
-    # broker-free device-code sign-in (no Node, no WAM) below.
-    $calReady = $false
-
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Warn2 "Node.js not found - installing (via winget)..."
-        if (Get-Command winget -ErrorAction SilentlyContinue) {
-            try {
-                winget install --id OpenJS.NodeJS.LTS -e --silent `
-                    --accept-package-agreements --accept-source-agreements | Out-Null
-            } catch { }
-            $env:PATH = (@($env:PATH,
-                [Environment]::GetEnvironmentVariable('PATH','Machine'),
-                [Environment]::GetEnvironmentVariable('PATH','User')) | Where-Object { $_ }) -join ';'
-        }
-    }
-
-    if (Get-Command node -ErrorAction SilentlyContinue) {
-        Write-Ok "Node.js $(node --version)"
-        Write-Step "Signing in to Microsoft 365 via the Windows broker (a window may open)"
-        try { npx -y '@microsoft/workiq@latest' accept-eula 2>$null | Out-Null } catch { }
-        try { npx -y '@microsoft/workiq@latest' auth login } catch { Write-Warn2 "WAM sign-in did not complete." }
-
-        Write-Step "Fetching today's calendar (WAM)"
-        & (Join-Path $InstallDir 'calendar\Update-Calendar.ps1') -Auth WorkIQ
-        if ($LASTEXITCODE -eq 0) { $calReady = $true }
-    }
-
-    # Fallback: broker-free device-code sign-in for machines/tenants where WAM
-    # fails (e.g. "ApiContractViolation") or Node.js is unavailable.
-    if (-not $calReady) {
-        Write-Warn2 "The WAM/WorkIQ path didn't work on this machine."
-        $tryDc = if ($Calendar -or $NoCalendar) { $true } else { Ask-YesNo "Sign in the broker-free way instead (device code - no Node, no WAM)?" }
-        if ($tryDc) {
-            Write-Step "Broker-free Microsoft 365 sign-in (device code)"
-            & (Join-Path $InstallDir 'calendar\Update-Calendar.ps1') -Login
-            if ($LASTEXITCODE -eq 0) { $calReady = $true }
-        }
-    }
-
-    if ($calReady) {
-        Write-Step "Scheduling a 15-minute refresh + installing the tray toggle"
-        & (Join-Path $InstallDir 'calendar\Register-CalendarTask.ps1')
-        # Register the tray for login WITHOUT running its blocking message loop
-        # (-NoStart returns right after writing the .lnk), then start it now as an
-        # independent hidden process via the VBS shim. This avoids any race where
-        # a synchronous -Install could fall through into Application.Run and hang
-        # the installer.
-        & (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1') -Install -NoStart
-        Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') `
-            -ArgumentList "`"$(Join-Path $InstallDir 'calendar\Start-CalendarTray.vbs')`""
-
-        $wallpaper = Join-Path $InstallDir 'calendar\wallpaper-calendar.html'
-        Write-Ok "Calendar overlay ready."
-    } else {
-        Write-Warn2 "Skipping the calendar overlay for now. You can set it up later from $InstallDir\calendar (see the README)."
-    }
+    Write-Step "Setting up the calendar module (Microsoft 365 sign-in)"
+    # The host owns module setup: `module enable calendar` signs in with MSAL
+    # (Windows broker first, device-code fallback), fetches today's events, and
+    # turns the overlay on. No Node.js, no WorkIQ, no scheduled task, no tray
+    # process — the running wallpaper hosts the tray and refreshes on its own.
+    # HtmlWallpaper.exe is a GUI (WinExe) app, so PowerShell's call operator does
+    # NOT wait for it; use Start-Process -Wait -NoNewWindow so the installer
+    # blocks until sign-in completes and shares this console (device-code prompt
+    # and progress stay visible; the WAM dialog can parent to it).
+    $cal = Start-Process -FilePath $exe -ArgumentList 'module','enable','calendar' `
+        -WorkingDirectory $InstallDir -NoNewWindow -Wait -PassThru
+    if ($cal.ExitCode -eq 0) { Write-Ok "Calendar module enabled." }
+    else { Write-Warn2 "Calendar sign-in didn't complete. Enable it later with:  `"$exe`" module enable calendar" }
 }
 
 # ---- Launch the wallpaper --------------------------------------------------
@@ -252,8 +207,9 @@ Write-Host "  Manage it:" -ForegroundColor Gray
 Write-Host "    Change wallpaper : `"$InstallDir\Set-Wallpaper.ps1`" -Source <file-or-url>"
 Write-Host "    Stop / restore   : `"$InstallDir\Stop-Wallpaper.ps1`""
 Write-Host "    Disable at login : `"$InstallDir\Disable-Startup.ps1`""
+Write-Host "    Modules          : `"$exe`" module list | enable <id> | disable <id>"
 if ($wantCalendar) {
-    Write-Host "    Toggle calendar  : Ctrl+Alt+C  (or the tray 'Calendar' item)"
+    Write-Host "    Toggle calendar  : Ctrl+Alt+C  (or the tray 'Outlook Calendar' item)"
 }
 Write-Host "    Uninstall        : irm https://raw.githubusercontent.com/$Owner/$Repo/main/uninstall.ps1 | iex"
 Write-Host ""

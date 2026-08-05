@@ -6,17 +6,10 @@ obj/
 *.user
 .vs/
 
-# Generated calendar data (contains personal calendar) and logs
-calendar/calendar-events.js
-calendar/*.log
-calendar/*.err
-
-# Per-user runtime UI state (overlay on/off flag)
-calendar/overlay-state.js
-
-# Per-user settings (hotkey combo)
-calendar/settings.json
-
-# Broker-free Graph token cache (DPAPI, per-user) + backend/source config
-calendar/graph-token.dat
-calendar/calendar-source.json
+# Generated per-module runtime state and fetched data (may contain personal info)
+modules/state.json
+modules/registry.js
+modules/*/data.js
+modules/*/calendar-token.bin*
+modules/**/*.log
+modules/**/*.err
