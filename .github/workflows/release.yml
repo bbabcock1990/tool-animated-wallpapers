@@ -48,10 +48,13 @@ jobs:
           Copy-Item Set-Wallpaper.ps1,Stop-Wallpaper.ps1,Enable-Startup.ps1,Disable-Startup.ps1 $stage
           Copy-Item README.md $stage
           Copy-Item calendar $stage -Recurse
-          # Do not ship any personal calendar data if present.
+          # Do not ship any personal calendar data / tokens if present.
           Remove-Item (Join-Path $stage "calendar/calendar-events.js") -ErrorAction SilentlyContinue
           Remove-Item (Join-Path $stage "calendar/overlay-state.js") -ErrorAction SilentlyContinue
           Remove-Item (Join-Path $stage "calendar/settings.json") -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "calendar/graph-token.dat") -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "calendar/calendar-source.json") -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "calendar/calendar-raw.json") -ErrorAction SilentlyContinue
           Compress-Archive -Path "$stage/*" -DestinationPath "AnimatedDesktopWallpaper-win-x64.zip" -Force
           Get-Item "AnimatedDesktopWallpaper-win-x64.zip" | Select-Object Name, Length
 

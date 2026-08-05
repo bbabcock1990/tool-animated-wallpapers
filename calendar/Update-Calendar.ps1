@@ -16,7 +16,20 @@
 param(
     [string]$OutDir,
     [switch]$SkipFetch,
-    [switch]$VerboseLog
+    [switch]$VerboseLog,
+    # Calendar backend:
+    #   Ics    = published .ics feed URL (no sign-in, no Graph, no WAM) - works
+    #            with new/modern Outlook and WAM-blocked / non-Microsoft tenants.
+    #   Graph  = broker-free device-code / browser sign-in (no Node, no WAM).
+    #   WorkIQ = legacy WorkIQ CLI (WAM broker).
+    #   Auto   = WorkIQ (WAM) first, then broker-free Graph (device code) as a
+    #            fallback. (-Login forces Graph; a configured ICS URL forces Ics.)
+    [ValidateSet('Auto', 'Ics', 'Graph', 'WorkIQ')][string]$Auth = 'Auto',
+    [string]$IcsUrl,           # published calendar .ics feed URL (saved for reuse)
+    [switch]$Login,            # force interactive Graph sign-in (installer runs this once)
+    [switch]$PreferBrowser,    # use the browser flow first instead of device code
+    [string]$GraphClientId,    # override the Graph public client (locked tenants)
+    [string]$GraphTenant       # override the Graph authority tenant
 )
 
 # Resolve the script's own folder robustly. $PSScriptRoot can be empty when the
@@ -57,10 +70,8 @@ try {
         (Join-Path ${env:ProgramFiles(x86)} 'nodejs\npx.cmd')
     )
     foreach ($f in $fallbacks) { if ($f -and (Test-Path $f)) { $npx = $f; break } }
-    if (-not $npx -and -not $SkipFetch) {
-        Write-Log "ERROR: npx (Node.js) not found in PATH or standard locations. Aborting."
-        exit 1
-    }
+    # npx may be absent when using the broker-free Graph backend; that is fine.
+    # The WorkIQ backend below errors only if it is actually the selected backend.
 }
 if ($npx) { Write-Log "Using npx: $npx" }
 
@@ -69,64 +80,133 @@ $today   = Get-Date
 $dayStr  = $today.ToString('yyyy-MM-dd')
 $start   = "$dayStr" + "T00:00:00"
 $end     = "$dayStr" + "T23:59:59"
+$selectQ = 'subject,start,end,location,isAllDay,isCancelled,showAs,isOnlineMeeting'
 
-$graphPath = "/me/calendarView?startDateTime=$start&endDateTime=$end" +
-             "&`$select=subject,start,end,location,isAllDay,isCancelled,showAs,isOnlineMeeting" +
-             "&`$orderby=start/dateTime&`$top=50"
+# ---- Backend implementations -----------------------------------------------
+# Each Fetch-* sets $script:bvalue to a Microsoft Graph-shaped event array, or
+# throws on failure so the driver can fall through to the next backend.
+$tokenScript = Join-Path $OutDir 'Get-GraphToken.ps1'
+$icsScript   = Join-Path $OutDir 'Get-IcsCalendar.ps1'
+$cacheFile   = Join-Path $OutDir 'graph-token.dat'
+$icsConfig   = Join-Path $OutDir 'calendar-source.json'
+$script:bvalue = $null
 
-if (-not $SkipFetch) {
-    if (Test-Path $rawPath) { Remove-Item $rawPath -Force }
+# Config file may hold a published ICS URL and/or a pinned backend preference,
+# so the unattended scheduled task (run with no args) reuses the right source.
+$cfg = $null
+if (Test-Path $icsConfig) { try { $cfg = Get-Content $icsConfig -Raw | ConvertFrom-Json } catch { } }
+if (-not $IcsUrl -and $cfg) { $IcsUrl = $cfg.icsUrl }
+$cfgAuth = if ($cfg) { $cfg.auth } else { $null }
 
-    Write-Log "Fetching calendar for $dayStr via WorkIQ CLI ..."
-    $errPath = Join-Path $OutDir 'calendar-fetch.err'
-    if (Test-Path $errPath) { Remove-Item $errPath -Force }
+function Save-Config([hashtable]$patch) {
+    $o = @{}
+    if ($cfg) { foreach ($p in $cfg.PSObject.Properties) { $o[$p.Name] = $p.Value } }
+    foreach ($k in $patch.Keys) { $o[$k] = $patch[$k] }
+    try { $o | ConvertTo-Json | Set-Content -Path $icsConfig -Encoding UTF8 } catch { }
+}
+if ($IcsUrl -and (-not $cfg -or $cfg.icsUrl -ne $IcsUrl)) { Save-Config @{ icsUrl = $IcsUrl } }
 
-    # Call the WorkIQ CLI directly (no AI credits). stdout is the raw Graph JSON.
-    $out = & $npx -y '@microsoft/workiq@latest' call-function -u $graphPath 2> $errPath | Out-String
-    $code = $LASTEXITCODE
-
-    if ($out -and $out.Trim()) {
-        Set-Content -Path $rawPath -Value $out -Encoding UTF8
+function Fetch-WorkIQ {
+    # Primary path: WorkIQ CLI, which signs in via the Windows WAM broker.
+    if (-not $npx -and -not $SkipFetch) { throw "npx (Node.js) not found for the WorkIQ/WAM backend." }
+    $graphPath = "/me/calendarView?startDateTime=$start&endDateTime=$end" +
+                 "&`$select=$selectQ&`$orderby=start/dateTime&`$top=50"
+    if (-not $SkipFetch) {
+        if (Test-Path $rawPath) { Remove-Item $rawPath -Force }
+        Write-Log "Fetching calendar for $dayStr via WorkIQ CLI (WAM) ..."
+        $errPath = Join-Path $OutDir 'calendar-fetch.err'
+        if (Test-Path $errPath) { Remove-Item $errPath -Force }
+        # Call the WorkIQ CLI directly (no AI credits). stdout is the raw Graph JSON.
+        $out = & $npx -y '@microsoft/workiq@latest' call-function -u $graphPath 2> $errPath | Out-String
+        $code = $LASTEXITCODE
+        if ($out -and $out.Trim()) { Set-Content -Path $rawPath -Value $out -Encoding UTF8 }
+        if ($code -ne 0) {
+            $errTxt = (Get-Content $errPath -Raw -ErrorAction SilentlyContinue)
+            throw "WorkIQ CLI exit $code. $errTxt"
+        }
+    } else {
+        Write-Log "SkipFetch: reusing existing $rawPath"
     }
-    if ($code -ne 0) {
-        $errTxt = (Get-Content $errPath -Raw -ErrorAction SilentlyContinue)
-        Write-Log "WARN: WorkIQ CLI exit $code. stderr: $errTxt"
+    if (-not (Test-Path $rawPath)) { throw "raw calendar file was not produced." }
+    $rawText = Get-Content $rawPath -Raw
+    $fb = $rawText.IndexOf('{'); $lb = $rawText.LastIndexOf('}')
+    if ($fb -ge 0 -and $lb -gt $fb) { $rawText = $rawText.Substring($fb, $lb - $fb + 1) }
+    $obj  = $rawText | ConvertFrom-Json
+    $node = $obj
+    if ($null -ne $node.data) { $node = $node.data }
+    $v = $node.value
+    if ($null -eq $v) { $v = $node }
+    if ($null -eq $v) { throw "no events array in WorkIQ response." }
+    $script:bvalue = $v
+}
+
+function Fetch-Graph {
+    # Fallback path: broker-free Microsoft Graph (device code by default), then a
+    # direct calendarView REST call. No Node, no WorkIQ, no WAM.
+    if (-not (Test-Path $tokenScript)) { throw "Get-GraphToken.ps1 not found next to this script." }
+    $gArgs = @{ CacheFile = $cacheFile; Interactive = [bool]$Login; Login = [bool]$Login; PreferBrowser = $PreferBrowser }
+    if ($GraphClientId) { $gArgs.ClientId = $GraphClientId }
+    if ($GraphTenant)   { $gArgs.Tenant   = $GraphTenant }
+    Write-Log "Fetching calendar via broker-free Microsoft Graph (device code) ..."
+    $token = & $tokenScript @gArgs
+    if (-not $token) { throw "no Graph access token acquired." }
+    $uri = "https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=$start&endDateTime=$end" +
+           "&`$select=$selectQ&`$orderby=start/dateTime&`$top=50"
+    $resp = Invoke-RestMethod -Uri $uri -Method Get -Headers @{
+        Authorization = "Bearer $token"
+        Prefer        = 'outlook.timezone="UTC"'
     }
-} else {
-    Write-Log "SkipFetch: reusing existing $rawPath"
+    $script:bvalue = $resp.value
 }
 
-if (-not (Test-Path $rawPath)) {
-    Write-Log "ERROR: raw calendar file was not produced. Keeping previous calendar-events.js."
-    exit 2
+function Fetch-Ics {
+    # Optional path: a published .ics feed (no sign-in at all).
+    if (-not $IcsUrl) { throw "-Auth Ics selected but no ICS URL configured (pass -IcsUrl once)." }
+    if (-not (Test-Path $icsScript)) { throw "Get-IcsCalendar.ps1 not found next to this script." }
+    Write-Log "Fetching calendar via published ICS feed ..."
+    $script:bvalue = & $icsScript -Url $IcsUrl -Date $today
 }
 
-# ---- Parse raw JSON (tolerate a few shapes the model might write) ----------
-$rawText = Get-Content $rawPath -Raw
-# Extract the outermost JSON object if the model added stray text.
-$firstBrace = $rawText.IndexOf('{')
-$lastBrace  = $rawText.LastIndexOf('}')
-if ($firstBrace -ge 0 -and $lastBrace -gt $firstBrace) {
-    $rawText = $rawText.Substring($firstBrace, $lastBrace - $firstBrace + 1)
+# ---- Backend order: WAM/WorkIQ primary, broker-free Graph fallback ----------
+switch ($Auth) {
+    'WorkIQ' { $order = @('WorkIQ') }
+    'Graph'  { $order = @('Graph') }
+    'Ics'    { $order = @('Ics') }
+    default  {
+        # Auto: explicit context wins; a pinned backend (from a prior setup)
+        # goes first; otherwise WAM first then broker-free device code.
+        if ($IcsUrl)                  { $order = @('Ics') }
+        elseif ($Login)               { $order = @('Graph') }          # -Login = set up device code now
+        elseif ($cfgAuth -eq 'Graph') { $order = @('Graph', 'WorkIQ') } # pinned to device code
+        elseif ($cfgAuth -eq 'WorkIQ'){ $order = @('WorkIQ', 'Graph') }
+        elseif ($npx)                 { $order = @('WorkIQ', 'Graph') } # WAM primary, device-code fallback
+        else                          { $order = @('Graph') }
+    }
 }
 
-try {
-    $obj = $rawText | ConvertFrom-Json
-} catch {
-    Write-Log "ERROR: could not parse raw JSON: $($_.Exception.Message). Keeping previous file."
-    exit 3
+$value = $null
+$used  = $null
+foreach ($b in $order) {
+    $script:bvalue = $null
+    try {
+        & "Fetch-$b"
+        $value = $script:bvalue
+        $used  = $b
+        break
+    } catch {
+        Write-Log "Backend $b failed: $($_.Exception.Message)"
+    }
 }
 
-# Unwrap common envelopes: { data: { value: [...] } } or { value: [...] }.
-$node = $obj
-if ($null -ne $node.data)  { $node = $node.data }
-$value = $node.value
-if ($null -eq $value) { $value = $node }   # in case the array itself was written
-
-if ($null -eq $value) {
-    Write-Log "ERROR: no 'value' array found in response. Keeping previous file."
+if ($null -eq $used) {
+    Write-Log "ERROR: all calendar backends failed ($($order -join ', ')). Keeping previous calendar-events.js."
     exit 4
 }
+Write-Log "Backend used: $used"
+
+# Pin the backend for future unattended refreshes: if we just set up device code
+# interactively, prefer Graph next time so the 15-min task stays silent and fast.
+if ($used -eq 'Graph' -and $Login -and $cfgAuth -ne 'Graph') { Save-Config @{ auth = 'Graph' } }
 
 # ---- Convert each event to local wall-clock and a compact shape ------------
 # ConvertFrom-Json may hand us either a string or an already-parsed [datetime];
