@@ -29,6 +29,7 @@ $here         = $PSScriptRoot
 $toggle       = Join-Path $here 'Toggle-Calendar.ps1'
 $stateFile    = Join-Path $here 'overlay-state.js'
 $settingsFile = Join-Path $here 'settings.json'
+$vbsPath      = Join-Path $here 'Start-CalendarTray.vbs'
 $lnkName      = 'HtmlWallpaper-CalendarTray.lnk'
 $startup      = [Environment]::GetFolderPath('Startup')
 $lnkPath      = Join-Path $startup $lnkName
@@ -40,16 +41,19 @@ if ($Uninstall) {
 }
 
 if ($Install) {
-    $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    # Launch via wscript.exe + a VBS shim so PowerShell starts fully hidden with
+    # no console window (a hidden -WindowStyle console can still flash/persist and,
+    # if closed, would kill the tray).
+    $wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
     $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut($lnkPath)
-    $lnk.TargetPath = $ps
-    $lnk.Arguments  = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$($MyInvocation.MyCommand.Path)`""
+    $lnk.TargetPath = $wscript
+    $lnk.Arguments  = "`"$vbsPath`""
     $lnk.WorkingDirectory = $here
     $lnk.WindowStyle = 7
     $lnk.Description = "HtmlWallpaper calendar overlay tray toggle"
     $lnk.Save()
-    Write-Host "Tray will start at login: $lnkPath"
+    Write-Host "Tray will start at login (no console window): $lnkPath"
     # Fall through and also start it now.
 }
 
