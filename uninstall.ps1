@@ -53,7 +53,15 @@ if (Test-Path (Join-Path $InstallDir 'calendar')) {
     if (Test-Path (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1')) {
         & (Join-Path $InstallDir 'calendar\Show-CalendarTray.ps1') -Uninstall
     }
-    Get-Process | Where-Object { $_.Name -eq 'powershell' -or $_.Name -eq 'pwsh' } | Out-Null
+    # Terminate the live tray host. It runs as a powershell/pwsh/wscript process
+    # whose command line references this install's tray scripts. The -Uninstall
+    # call above only removes the startup shortcut; it does NOT stop the running
+    # process, so without this the tray icon survives an uninstall (zombie).
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -in 'powershell.exe','pwsh.exe','wscript.exe' -and $_.CommandLine -and
+        $_.CommandLine -like "*$InstallDir*" -and
+        ($_.CommandLine -like '*Show-CalendarTray*' -or $_.CommandLine -like '*Start-CalendarTray*')
+    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Write-Ok "Removed."
 }
 
