@@ -105,7 +105,18 @@ public class GlobalHotkeyWindow : NativeWindow, IDisposable {
     }
 }
 '@
-Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition $hotkeyCs -Language CSharp
+# Reference the actual loaded assemblies by path so this compiles on both
+# Windows PowerShell 5.1 (.NET Framework, where Message lives in
+# System.Windows.Forms) and PowerShell 7+ (.NET, where Message has been
+# forwarded to System.Windows.Forms.Primitives). Referencing only
+# "System.Windows.Forms" by name fails with CS1069 on .NET.
+$hotkeyRefs = New-Object System.Collections.Generic.List[string]
+$hotkeyRefs.Add([System.Windows.Forms.Form].Assembly.Location)
+$hotkeyRefs.Add([System.Windows.Forms.NativeWindow].Assembly.Location)
+$hotkeyRefs.Add([System.Windows.Forms.Message].Assembly.Location)
+$hotkeyRefs.Add([System.ComponentModel.Component].Assembly.Location)
+$hotkeyRefs = @($hotkeyRefs | Where-Object { $_ } | Sort-Object -Unique)
+Add-Type -ReferencedAssemblies $hotkeyRefs -TypeDefinition $hotkeyCs -Language CSharp
 
 # --- State (overlay on/off) ---
 function Get-State {
