@@ -10,9 +10,15 @@ param(
     [switch]$Primary
 )
 
-$exe = Join-Path $PSScriptRoot "bin\Release\net8.0-windows\HtmlWallpaper.exe"
-if (-not (Test-Path $exe)) {
-    Write-Error "HtmlWallpaper.exe not found. Build first: dotnet build -c Release"
+# Locate HtmlWallpaper.exe in either the installed layout (exe next to this
+# script) or a dev build tree (bin\Release\...).
+$exe = @(
+    (Join-Path $PSScriptRoot "HtmlWallpaper.exe")
+    (Join-Path $PSScriptRoot "bin\Release\net8.0-windows\HtmlWallpaper.exe")
+    (Join-Path $PSScriptRoot "bin\Release\net8.0-windows\win-x64\HtmlWallpaper.exe")
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $exe) {
+    Write-Error "HtmlWallpaper.exe not found next to this script or in bin\Release. Build first (dotnet build -c Release) or run install.ps1."
     exit 1
 }
 if ($Source -notmatch '^https?://') { $Source = (Resolve-Path $Source).Path }

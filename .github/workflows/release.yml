@@ -1,0 +1,77 @@
+name: Release
+
+# Publishes a self-contained Windows build so users can install without .NET.
+# Triggers on a version tag (e.g. v1.2.0) or manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish self-contained single-file exe
+        shell: pwsh
+        run: |
+          dotnet publish -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=none -p:DebugSymbols=false
+
+      - name: Stage release payload
+        shell: pwsh
+        run: |
+          $stage = "stage/AnimatedDesktopWallpaper"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $pub = "bin/Release/net8.0-windows/win-x64/publish"
+          Copy-Item "$pub/HtmlWallpaper.exe" $stage
+          # Runtime assets + management scripts (flat install layout).
+          Copy-Item wallpaper.html,wallpaper-core.css,wallpaper-core.js,static-wallpaper.png,demo.html $stage
+          Copy-Item Set-Wallpaper.ps1,Stop-Wallpaper.ps1,Enable-Startup.ps1,Disable-Startup.ps1 $stage
+          Copy-Item README.md $stage
+          Copy-Item calendar $stage -Recurse
+          # Do not ship any personal calendar data if present.
+          Remove-Item (Join-Path $stage "calendar/calendar-events.js") -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "calendar/overlay-state.js") -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "calendar/settings.json") -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$stage/*" -DestinationPath "AnimatedDesktopWallpaper-win-x64.zip" -Force
+          Get-Item "AnimatedDesktopWallpaper-win-x64.zip" | Select-Object Name, Length
+
+      - name: Resolve tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF -like "refs/tags/*") { $env:GITHUB_REF -replace "refs/tags/","" } else { "${{ github.event.inputs.tag }}" }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create / update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          if (-not (gh release view $tag 2>$null)) {
+            gh release create $tag "AnimatedDesktopWallpaper-win-x64.zip" `
+              --title "$tag" `
+              --notes "Self-contained Windows build. Install with the one-liner in the README (no .NET required)."
+          } else {
+            gh release upload $tag "AnimatedDesktopWallpaper-win-x64.zip" --clobber
+          }
