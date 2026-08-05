@@ -75,7 +75,9 @@ Write-Host "  https://github.com/$Owner/$Repo" -ForegroundColor DarkGray
 Write-Step "Checking your system"
 $os = [Environment]::OSVersion.Version
 if ($os.Major -lt 10) { throw "Windows 10 or 11 is required (found $os)." }
-Write-Ok "Windows $($os.Major) build $($os.Build)"
+# Windows 11 still reports OS version 10.0.x; only the build number (>= 22000) distinguishes it from Windows 10.
+$winName = if ($os.Build -ge 22000) { '11' } else { '10' }
+Write-Ok "Windows $winName build $($os.Build)"
 
 # ---- WebView2 runtime ------------------------------------------------------
 function Test-WebView2 {
