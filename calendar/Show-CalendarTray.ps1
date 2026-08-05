@@ -22,7 +22,8 @@
 [CmdletBinding()]
 param(
     [switch]$Install,
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    [switch]$NoStart
 )
 
 $here         = $PSScriptRoot
@@ -54,6 +55,10 @@ if ($Install) {
     $lnk.Description = "HtmlWallpaper calendar overlay tray toggle"
     $lnk.Save()
     Write-Host "Tray will start at login (no console window): $lnkPath"
+    # -NoStart just registers the login entry and returns, WITHOUT falling through
+    # to the tray message loop (Application.Run) below. Installers use this so they
+    # never block; they start the tray separately via Start-CalendarTray.vbs.
+    if ($NoStart) { return }
     # Fall through and also start it now.
 }
 
