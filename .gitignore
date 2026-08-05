@@ -16,3 +16,7 @@ calendar/overlay-state.js
 
 # Per-user settings (hotkey combo)
 calendar/settings.json
+
+# Broker-free Graph token cache (DPAPI, per-user) + backend/source config
+calendar/graph-token.dat
+calendar/calendar-source.json

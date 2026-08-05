@@ -169,27 +169,48 @@ $wallpaper = Join-Path $InstallDir 'wallpaper.html'
 if ($wantCalendar) {
     Write-Step "Setting up the calendar overlay"
 
-    # Node.js (for the WorkIQ CLI).
+    # Primary path: the WorkIQ CLI, which signs in via the Windows WAM broker.
+    # Best-effort - if Node.js or WAM isn't available/working, we fall back to a
+    # broker-free device-code sign-in (no Node, no WAM) below.
+    $calReady = $false
+
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Warn2 "Node.js not found - installing (via winget)..."
         if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget install --id OpenJS.NodeJS.LTS -e --silent `
-                --accept-package-agreements --accept-source-agreements | Out-Null
+            try {
+                winget install --id OpenJS.NodeJS.LTS -e --silent `
+                    --accept-package-agreements --accept-source-agreements | Out-Null
+            } catch { }
             $env:PATH = (@($env:PATH,
                 [Environment]::GetEnvironmentVariable('PATH','Machine'),
                 [Environment]::GetEnvironmentVariable('PATH','User')) | Where-Object { $_ }) -join ';'
         }
     }
+
     if (Get-Command node -ErrorAction SilentlyContinue) {
         Write-Ok "Node.js $(node --version)"
-
-        Write-Step "Signing in to Microsoft 365 (a browser window may open)"
+        Write-Step "Signing in to Microsoft 365 via the Windows broker (a window may open)"
         try { npx -y '@microsoft/workiq@latest' accept-eula 2>$null | Out-Null } catch { }
-        npx -y '@microsoft/workiq@latest' auth login
+        try { npx -y '@microsoft/workiq@latest' auth login } catch { Write-Warn2 "WAM sign-in did not complete." }
 
-        Write-Step "Fetching today's calendar"
-        & (Join-Path $InstallDir 'calendar\Update-Calendar.ps1')
+        Write-Step "Fetching today's calendar (WAM)"
+        & (Join-Path $InstallDir 'calendar\Update-Calendar.ps1') -Auth WorkIQ
+        if ($LASTEXITCODE -eq 0) { $calReady = $true }
+    }
 
+    # Fallback: broker-free device-code sign-in for machines/tenants where WAM
+    # fails (e.g. "ApiContractViolation") or Node.js is unavailable.
+    if (-not $calReady) {
+        Write-Warn2 "The WAM/WorkIQ path didn't work on this machine."
+        $tryDc = if ($Calendar -or $NoCalendar) { $true } else { Ask-YesNo "Sign in the broker-free way instead (device code - no Node, no WAM)?" }
+        if ($tryDc) {
+            Write-Step "Broker-free Microsoft 365 sign-in (device code)"
+            & (Join-Path $InstallDir 'calendar\Update-Calendar.ps1') -Login
+            if ($LASTEXITCODE -eq 0) { $calReady = $true }
+        }
+    }
+
+    if ($calReady) {
         Write-Step "Scheduling a 15-minute refresh + installing the tray toggle"
         & (Join-Path $InstallDir 'calendar\Register-CalendarTask.ps1')
         # Register the tray for login WITHOUT running its blocking message loop
@@ -204,7 +225,7 @@ if ($wantCalendar) {
         $wallpaper = Join-Path $InstallDir 'calendar\wallpaper-calendar.html'
         Write-Ok "Calendar overlay ready."
     } else {
-        Write-Warn2 "Node.js is unavailable; skipping the calendar overlay. You can run it later from $InstallDir\calendar."
+        Write-Warn2 "Skipping the calendar overlay for now. You can set it up later from $InstallDir\calendar (see the README)."
     }
 }
 
