@@ -104,6 +104,8 @@ The wallpaper can't receive mouse clicks (clicks pass through to the desktop ico
 
 On Windows 11 a new tray icon starts in the notification-area **overflow** (the `^` chevron) — drag it onto the taskbar to keep it visible. Toggling only shows/hides the panel; it doesn't stop the refresh task (use `Register-CalendarTask.ps1 -Unregister` for that).
 
+`-Install` runs the tray at login via `Start-CalendarTray.vbs` (launched by `wscript.exe`), so PowerShell starts **fully hidden with no console window**. For a manual no-console start you can also double-click `calendar\Start-CalendarTray.vbs` instead of running the `.ps1` directly.
+
 #### Global hotkey & settings
 
 The tray registers a **global hotkey** (default `Ctrl+Alt+C`) that flips the overlay from anywhere — no need to find the tray icon. Change it at runtime from the tray's **Settings…** dialog: click the box, press the combo you want (at least one of Ctrl/Alt/Shift plus a key), and Save. The new hotkey re-registers immediately and the tray menu shows the active combo.
