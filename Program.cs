@@ -9,6 +9,10 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // Module management CLI: HtmlWallpaper.exe module <list|enable|disable|refresh|add|registry> ...
+        if (ModuleCli.IsModuleCommand(args))
+            return ModuleCli.Run(args);
+
         if (args.Length == 0 || args[0] is "-h" or "--help" or "/?")
         {
             MessageBox.Show(
@@ -86,6 +90,12 @@ internal sealed class MultiFormContext : ApplicationContext
     private int _generation;
     private string _builtSignature = "";
 
+    // Module runtime (tray + in-process data scheduler), owned by the wallpaper
+    // process so there is no separate tray process or scheduled task.
+    private readonly Modules.ModuleService _moduleService = new();
+    private Modules.ModuleScheduler? _scheduler;
+    private Tray.ModuleTray? _tray;
+
     public MultiFormContext(string source, string[] args)
     {
         _source = source;
@@ -101,6 +111,31 @@ internal sealed class MultiFormContext : ApplicationContext
         _reconcile.Start();
 
         Build();
+
+        // Start the module runtime once, after the UI thread/message loop exists.
+        StartModuleRuntime();
+    }
+
+    private void StartModuleRuntime()
+    {
+        try
+        {
+            // Ensure the browser-readable registry reflects the current state.
+            _moduleService.Registry.WriteRegistry();
+            _tray = new Tray.ModuleTray(_moduleService);
+            _scheduler = new Modules.ModuleScheduler(_moduleService);
+        }
+        catch { /* the wallpaper must still run even if the module runtime fails */ }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _scheduler?.Dispose();
+            _tray?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)

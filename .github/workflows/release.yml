@@ -45,16 +45,17 @@ jobs:
           Copy-Item "$pub/HtmlWallpaper.exe" $stage
           # Runtime assets + management scripts (flat install layout).
           Copy-Item wallpaper.html,wallpaper-core.css,wallpaper-core.js,static-wallpaper.png,demo.html $stage
+          Copy-Item module-loader.js $stage
           Copy-Item Set-Wallpaper.ps1,Stop-Wallpaper.ps1,Enable-Startup.ps1,Disable-Startup.ps1 $stage
           Copy-Item README.md $stage
-          Copy-Item calendar $stage -Recurse
-          # Do not ship any personal calendar data / tokens if present.
-          Remove-Item (Join-Path $stage "calendar/calendar-events.js") -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $stage "calendar/overlay-state.js") -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $stage "calendar/settings.json") -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $stage "calendar/graph-token.dat") -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $stage "calendar/calendar-source.json") -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $stage "calendar/calendar-raw.json") -ErrorAction SilentlyContinue
+          # Ship module folders (manifests + web assets). The C# runtime is
+          # compiled into the exe; only the per-module web assets ship here.
+          Copy-Item modules $stage -Recurse
+          # Do not ship any generated per-user state, fetched data, or tokens.
+          Get-ChildItem (Join-Path $stage "modules") -Recurse -Include `
+            data.js,registry.js,state.json,config.json,calendar-token.bin,*.log,*.err |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $stage "modules/state.json") -ErrorAction SilentlyContinue
           Compress-Archive -Path "$stage/*" -DestinationPath "AnimatedDesktopWallpaper-win-x64.zip" -Force
           Get-Item "AnimatedDesktopWallpaper-win-x64.zip" | Select-Object Name, Length
 

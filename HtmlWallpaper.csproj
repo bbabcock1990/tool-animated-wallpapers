@@ -9,10 +9,18 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>HtmlWallpaper</AssemblyName>
     <Version>1.0.0</Version>
+    <!-- WebView2 ships an (unused) WPF assembly that triggers a harmless
+         WindowsBase version-unification warning under net8. We use WinForms only. -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <!-- Calendar module M365 auth: MSAL with the Windows broker (WAM) and a
+         device-code fallback, plus a DPAPI-encrypted token cache on disk. -->
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.66.2" />
+    <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.66.2" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.66.2" />
   </ItemGroup>
 
 </Project>
