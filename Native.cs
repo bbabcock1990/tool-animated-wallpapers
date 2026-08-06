@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Runtime.InteropServices;
 
 namespace HtmlWallpaper;
@@ -49,6 +50,50 @@ internal static class Native
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    internal static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    internal delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT lprcMonitor, IntPtr dwData);
+
+    internal const uint MONITORINFOF_PRIMARY = 0x1;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    /// <summary>
+    /// Enumerate the current monitors directly from the OS on every call.
+    /// Unlike System.Windows.Forms.Screen.AllScreens (which caches its result and only
+    /// invalidates on a SystemEvents.DisplaySettingsChanging notification that a docked
+    /// laptop does not always deliver to this process), this always reflects the live
+    /// display layout, so the reconcile poll can detect a dock/undock and rebuild.
+    /// </summary>
+    internal static List<(Rectangle Bounds, bool Primary)> EnumerateMonitors()
+    {
+        var monitors = new List<(Rectangle, bool)>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT _, IntPtr _) =>
+        {
+            var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(hMon, ref mi))
+            {
+                var bounds = Rectangle.FromLTRB(
+                    mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right, mi.rcMonitor.Bottom);
+                bool primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+                monitors.Add((bounds, primary));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return monitors;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT

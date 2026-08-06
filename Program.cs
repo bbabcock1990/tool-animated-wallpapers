@@ -58,23 +58,33 @@ internal static class Program
 
     internal static List<Rectangle> ResolveTargetScreens(string[] args)
     {
-        Screen[] screens = Screen.AllScreens;
+        // Enumerate monitors live from the OS (not the cached Screen.AllScreens, which
+        // can stay stale across a dock/undock when the display-change notification is
+        // not delivered to this process — the root cause of the wallpaper not expanding
+        // onto newly connected monitors).
+        List<(Rectangle Bounds, bool Primary)> monitors = Native.EnumerateMonitors();
+
+        // Fall back to WinForms only in the unlikely event the OS enumeration is empty.
+        if (monitors.Count == 0)
+            monitors = Screen.AllScreens.Select(s => (s.Bounds, s.Primary)).ToList();
 
         int monitorFlag = Array.FindIndex(args, a =>
             string.Equals(a, "--monitor", StringComparison.OrdinalIgnoreCase));
         if (monitorFlag >= 0 && monitorFlag + 1 < args.Length &&
             int.TryParse(args[monitorFlag + 1], out int idx) &&
-            idx >= 0 && idx < screens.Length)
+            idx >= 0 && idx < monitors.Count)
         {
-            return new List<Rectangle> { screens[idx].Bounds };
+            return new List<Rectangle> { monitors[idx].Bounds };
         }
 
         if (args.Contains("--primary", StringComparer.OrdinalIgnoreCase))
         {
-            return new List<Rectangle> { Screen.PrimaryScreen!.Bounds };
+            (Rectangle Bounds, bool Primary) primary =
+                monitors.FirstOrDefault(m => m.Primary, monitors[0]);
+            return new List<Rectangle> { primary.Bounds };
         }
 
-        return screens.Select(s => s.Bounds).ToList();
+        return monitors.Select(m => m.Bounds).ToList();
     }
 }
 
