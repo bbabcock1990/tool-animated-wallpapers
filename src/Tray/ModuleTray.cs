@@ -194,6 +194,16 @@ internal sealed class ModuleTray : IDisposable
 
     private static Icon LoadIcon()
     {
+        // Prefer the embedded aurora icon, choosing the frame that matches the
+        // system tray size for a crisp render.
+        try
+        {
+            using Stream? s = typeof(ModuleTray).Assembly
+                .GetManifestResourceStream("appicon.ico");
+            if (s is not null)
+                return new Icon(s, SystemInformation.SmallIconSize);
+        }
+        catch { /* fall through */ }
         try
         {
             string? exe = Environment.ProcessPath;
