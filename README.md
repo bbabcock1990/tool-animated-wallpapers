@@ -33,24 +33,24 @@ Stops the wallpaper, removes the login entry, cleans up any legacy calendar task
 
 ### Manage it
 
-After install, everything lives in `%LOCALAPPDATA%\AnimatedDesktopWallpaper`:
+Everything is driven by `HtmlWallpaper.exe` itself — no helper scripts. After install it lives in `%LOCALAPPDATA%\AnimatedDesktopWallpaper`:
 
 ```powershell
-$dir = "$env:LOCALAPPDATA\AnimatedDesktopWallpaper"
+$exe = "$env:LOCALAPPDATA\AnimatedDesktopWallpaper\HtmlWallpaper.exe"
 
 # Change the wallpaper (any local HTML file or a URL)
-& "$dir\Set-Wallpaper.ps1" -Source "$dir\demo.html"
-& "$dir\Set-Wallpaper.ps1" -Source https://example.com
+& $exe set "$env:LOCALAPPDATA\AnimatedDesktopWallpaper\demo.html"
+& $exe set https://example.com
 
 # Stop / restore the normal desktop
-& "$dir\Stop-Wallpaper.ps1"
+& $exe stop
 
 # Start-at-login on / off
-& "$dir\Enable-Startup.ps1" -Source "$dir\wallpaper.html"
-& "$dir\Disable-Startup.ps1"
+& $exe autostart on --source "$env:LOCALAPPDATA\AnimatedDesktopWallpaper\wallpaper.html"
+& $exe autostart off
 ```
 
-- Renders on **every monitor by default** (one window per display, each correctly positioned); pass `--primary` (or `-Primary`) for the primary monitor only, or `--monitor N` (0-based) to target a single display.
+- `set` and `autostart on` take `--primary` (primary monitor only) or `--monitor N` (0-based) to target a single display; the default is every monitor.
 - **Dynamic multi-monitor**: it watches for display changes (dock/undock, monitor added/removed, resolution or layout changes) and rebuilds the per-monitor windows automatically — no restart needed.
 - Only one instance runs at a time — launching a new one replaces the old.
 
@@ -80,9 +80,9 @@ dotnet build -c Release
 .\bin\Release\net8.0-windows\HtmlWallpaper.exe .\wallpaper.html
 .\bin\Release\net8.0-windows\HtmlWallpaper.exe https://example.com
 
-# Or use the helper scripts
-.\Set-Wallpaper.ps1 -Source .\wallpaper.html
-.\Stop-Wallpaper.ps1
+# Management verbs are built into the exe
+.\bin\Release\net8.0-windows\HtmlWallpaper.exe set .\wallpaper.html
+.\bin\Release\net8.0-windows\HtmlWallpaper.exe stop
 ```
 
 Produce the same single-file, self-contained build the installer ships:
@@ -177,6 +177,8 @@ HtmlWallpaper.exe module enable calendar --auth msal      # Windows broker / MSA
 For the MSAL method you can point at an admin-consented app or restrict the tenant via the manifest `settings` (`clientId`, `tenant`, `scopes`).
 
 > **Note — locked-down tenants:** if your tenant disables user consent (e.g. **microsoft.com**), the generic *Microsoft Graph Command Line Tools* client used by MSAL shows **"Need admin approval"** and can't sign in until an admin consents to it. Use the **WorkIQ** method (or **Auto**), which authenticates through WorkIQ's already-approved app. Token-protection Conditional Access additionally blocks the MSAL **device-code** fallback (WAM still works there).
+
+## How it works
 
 Windows 11's modern "raised desktop with layered ShellView" renders the wallpaper differently from older Windows. `Progman` carries `WS_EX_NOREDIRECTIONBITMAP`, `SHELLDLL_DefView` (the icons) is a *layered child* of Progman, and the wallpaper is drawn by a `WorkerW` child of Progman that is z-ordered **under** the icons.
 
