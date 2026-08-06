@@ -7,12 +7,20 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
     <AssemblyName>HtmlWallpaper</AssemblyName>
     <Version>1.0.0</Version>
     <!-- WebView2 ships an (unused) WPF assembly that triggers a harmless
          WindowsBase version-unification warning under net8. We use WinForms only. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embed the icon so the tray can load a crisp small frame at runtime. -->
+    <EmbeddedResource Include="appicon.ico">
+      <LogicalName>appicon.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
