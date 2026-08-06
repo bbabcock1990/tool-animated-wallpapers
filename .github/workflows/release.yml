@@ -43,10 +43,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           $pub = "bin/Release/net8.0-windows/win-x64/publish"
           Copy-Item "$pub/HtmlWallpaper.exe" $stage
-          # Runtime assets + management scripts (flat install layout).
+          # Runtime assets (flat install layout). Management is built into the exe
+          # (set / stop / autostart / module) — no helper scripts to ship.
           Copy-Item wallpaper.html,wallpaper-core.css,wallpaper-core.js,static-wallpaper.png,demo.html $stage
           Copy-Item module-loader.js $stage
-          Copy-Item Set-Wallpaper.ps1,Stop-Wallpaper.ps1,Enable-Startup.ps1,Disable-Startup.ps1 $stage
           Copy-Item README.md $stage
           # Ship module folders (manifests + web assets). The C# runtime is
           # compiled into the exe; only the per-module web assets ship here.

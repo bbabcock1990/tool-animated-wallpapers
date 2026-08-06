@@ -31,17 +31,17 @@ Write-Host "  Animated Desktop Wallpapers Helper - uninstall" -ForegroundColor M
 
 # Stop the wallpaper (this restores the normal desktop).
 Write-Step "Stopping the wallpaper"
-if (Test-Path (Join-Path $InstallDir 'Stop-Wallpaper.ps1')) {
-    & (Join-Path $InstallDir 'Stop-Wallpaper.ps1')
-} else {
-    Get-Process HtmlWallpaper | ForEach-Object { Stop-Process -Id $_.Id -Force }
+$exe = Join-Path $InstallDir 'HtmlWallpaper.exe'
+if (Test-Path $exe) {
+    Start-Process -FilePath $exe -ArgumentList 'stop' -NoNewWindow -Wait | Out-Null
 }
+Get-Process HtmlWallpaper -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force }
 Write-Ok "Stopped."
 
 # Remove start-at-login shortcut.
 Write-Step "Removing start-at-login"
-if (Test-Path (Join-Path $InstallDir 'Disable-Startup.ps1')) {
-    & (Join-Path $InstallDir 'Disable-Startup.ps1')
+if (Test-Path $exe) {
+    Start-Process -FilePath $exe -ArgumentList 'autostart','off' -NoNewWindow -Wait | Out-Null
 }
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'HtmlWallpaper.lnk') -Force
 Write-Ok "Removed."

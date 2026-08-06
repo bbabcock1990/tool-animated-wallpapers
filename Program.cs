@@ -13,18 +13,25 @@ internal static class Program
         if (ModuleCli.IsModuleCommand(args))
             return ModuleCli.Run(args);
 
+        // Management CLI: HtmlWallpaper.exe <set|stop|autostart> ... (folds in the
+        // old Set-Wallpaper / Stop-Wallpaper / Enable-Startup / Disable-Startup scripts).
+        if (WallpaperCli.IsCommand(args))
+            return WallpaperCli.Run(args);
+
         if (args.Length == 0 || args[0] is "-h" or "--help" or "/?")
         {
             MessageBox.Show(
                 "HtmlWallpaper — render an HTML file or URL as your Windows desktop background.\n\n" +
-                "Usage:\n" +
-                "  HtmlWallpaper.exe <path-to-html | url> [--primary | --monitor N]\n\n" +
-                "Options:\n" +
-                "  (default)    Render on every monitor (one window per display).\n" +
+                "Render:\n" +
+                "  HtmlWallpaper.exe <path-to-html | url> [--primary | --monitor N]\n" +
                 "  --primary    Cover only the primary monitor.\n" +
                 "  --monitor N  Cover only monitor index N (0-based).\n\n" +
-                "Stop it:\n" +
-                "  End the HtmlWallpaper.exe process (Task Manager) or run refresh of the desktop.",
+                "Manage:\n" +
+                "  HtmlWallpaper.exe set <file|url> [--primary | --monitor N]   Set the wallpaper.\n" +
+                "  HtmlWallpaper.exe stop                                       Stop it, restore desktop.\n" +
+                "  HtmlWallpaper.exe autostart on --source <file|url>           Run at login.\n" +
+                "  HtmlWallpaper.exe autostart off                             Remove login entry.\n" +
+                "  HtmlWallpaper.exe module list                               Manage modules.",
                 "HtmlWallpaper", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 1;
         }

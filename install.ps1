@@ -266,17 +266,20 @@ else { Write-Warn2 "The wallpaper process did not stay running; try launching $e
 # ---- Start at login --------------------------------------------------------
 if (-not $NoAutostart) {
     Write-Step "Enabling start-at-login"
-    & (Join-Path $InstallDir 'Enable-Startup.ps1') -Source $wallpaper
+    # `autostart on` creates the login shortcut in-process (no helper script);
+    # it doesn't spawn the wallpaper, so -Wait can't hang on a shared console.
+    Start-Process -FilePath $exe -ArgumentList 'autostart','on','--source',"`"$wallpaper`"" `
+        -WorkingDirectory $InstallDir -NoNewWindow -Wait | Out-Null
 }
 
 # ---- Done ------------------------------------------------------------------
 Write-Host ""
 Write-Host "  Done. Installed to: $InstallDir" -ForegroundColor Magenta
 Write-Host ""
-Write-Host "  Manage it:" -ForegroundColor Gray
-Write-Host "    Change wallpaper : `"$InstallDir\Set-Wallpaper.ps1`" -Source <file-or-url>"
-Write-Host "    Stop / restore   : `"$InstallDir\Stop-Wallpaper.ps1`""
-Write-Host "    Disable at login : `"$InstallDir\Disable-Startup.ps1`""
+Write-Host "  Manage it (all through HtmlWallpaper.exe):" -ForegroundColor Gray
+Write-Host "    Change wallpaper : `"$exe`" set <file-or-url>"
+Write-Host "    Stop / restore   : `"$exe`" stop"
+Write-Host "    Disable at login : `"$exe`" autostart off"
 Write-Host "    Modules          : `"$exe`" module list | enable <id> | disable <id>"
 if ($wantCalendar) {
     Write-Host "    Toggle calendar  : Ctrl+Alt+C  (or the tray 'Outlook Calendar' item)"
