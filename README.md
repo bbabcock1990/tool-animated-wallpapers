@@ -1,10 +1,25 @@
 # Animated Desktop Wallpapers Helper
 
+[![Latest release](https://img.shields.io/github/v/release/bbabcock1990/Animated-Desktop-Wall-Papers-Helper?color=6f42c1&label=release)](https://github.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/total?color=2ea043)](https://github.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/releases)
+[![Release build](https://github.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/actions/workflows/release.yml/badge.svg)](https://github.com/bbabcock1990/Animated-Desktop-Wall-Papers-Helper/actions/workflows/release.yml)
+![Platform: Windows 11](https://img.shields.io/badge/platform-Windows%2011-0078D6)
+![.NET 8](https://img.shields.io/badge/.NET-8-512BD4)
+
 Render **any HTML page — CSS animations, JavaScript, and `<canvas>` — as your live Windows 11 desktop background**, behind your desktop icons. No third-party wallpaper app required.
 
 It hosts **WebView2** (the Edge engine already on Windows 11) inside a full-screen window parented to the desktop using the Windows shell **WorkerW / Progman** technique.
 
 ![Animated aurora wallpaper](static-wallpaper.png)
+
+## Features
+
+- 🎨 **Any web page as wallpaper** — HTML/CSS animations, JavaScript, and `<canvas>`, rendered live behind your icons.
+- 🖥️ **Multi-monitor, dynamic** — one window per display, and it rebuilds automatically on dock/undock or resolution changes.
+- 📦 **One-command install** — a self-contained build (no .NET required); installs WebView2 if missing and starts at login.
+- 🧩 **Modules** — layer optional features on any wallpaper (e.g. an Outlook calendar overlay) and toggle them from a system-tray icon or a global hotkey.
+- 🔐 **Locked-down-tenant friendly calendar** — signs in via WorkIQ (reuses your Windows M365 sign-in) or MSAL/WAM, so it works even where generic Graph clients need admin consent.
+- 🛠️ **Everything in one exe** — `set`, `stop`, `autostart`, and `module` are subcommands of `HtmlWallpaper.exe`; no helper scripts or scheduled tasks.
 
 ## Install (one command)
 
