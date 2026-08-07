@@ -98,14 +98,20 @@ internal sealed class MultiFormContext : ApplicationContext
     private readonly string _source;
     private readonly string[] _args;
     private readonly List<WallpaperForm> _forms = new();
-    private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 1500 };
-    // Safety net: even if a display event is missed (undock/lid-close/monitor
-    // power transitions don't always raise DisplaySettingsChanged), poll the
-    // monitor layout and rebuild when it no longer matches what we drew.
-    private readonly System.Windows.Forms.Timer _reconcile = new() { Interval = 2000 };
-    private bool _rebuilding;
+    // Authoritative display-change detection. The previous implementation used
+    // System.Windows.Forms.Timer for this, but WM_TIMER delivery on the UI thread
+    // was observed to stop after some dock/undock and resume-from-sleep transitions,
+    // leaving the wallpaper stuck on the old monitor layout. A thread-pool timer is
+    // independent of the UI message pump and keeps polling reliably (this is the same
+    // mechanism the module scheduler uses). The rebuild itself is marshaled back onto
+    // the UI thread via _sync, since WinForms windows must be created/closed there.
+    private System.Threading.Timer? _poll;
+    private readonly Form _sync = new() { ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None };
+    private volatile bool _rebuilding;
+    private volatile bool _rebuildRequested;
+    private volatile string _builtSignature = "";
+    private string _pendingSignature = "";
     private int _generation;
-    private string _builtSignature = "";
 
     // Module runtime (tray + in-process data scheduler), owned by the wallpaper
     // process so there is no separate tray process or scheduled task.
@@ -118,19 +124,24 @@ internal sealed class MultiFormContext : ApplicationContext
         _source = source;
         _args = args;
 
-        // Coalesce bursts of DisplaySettingsChanged events into a single rebuild.
-        _debounce.Tick += (_, _) => { _debounce.Stop(); Rebuild(); };
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        // Force the hidden marshaling window's handle to be created now, on the UI
+        // thread, so the background poll timer can BeginInvoke the rebuild onto it.
+        _ = _sync.Handle;
 
-        // Reconcile the drawn layout against the current monitors on a timer so a
-        // missed display event can't leave a stale (wrong-size / off-screen) wallpaper.
-        _reconcile.Tick += (_, _) => ReconcileLayout();
-        _reconcile.Start();
+        // Fast-path hint. This can fire before the poll notices, but it is NOT relied
+        // upon — it does not always arrive on dock/undock or resume-from-sleep, which
+        // is why the thread-pool poll below is the authoritative detector.
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         Build();
 
         // Start the module runtime once, after the UI thread/message loop exists.
         StartModuleRuntime();
+
+        // Poll the live monitor layout every second on a thread-pool timer and rebuild
+        // when it drifts from what we drew. Independent of the UI message pump.
+        _poll = new System.Threading.Timer(_ => Poll(), null,
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     private void StartModuleRuntime()
@@ -149,30 +160,49 @@ internal sealed class MultiFormContext : ApplicationContext
     {
         if (disposing)
         {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            _poll?.Dispose();
             _scheduler?.Dispose();
             _tray?.Dispose();
+            _sync?.Dispose();
         }
         base.Dispose(disposing);
     }
 
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => RequestRebuild();
+
+    /// <summary>
+    /// Runs on a thread-pool thread. Compares the live monitor layout to what we drew
+    /// and requests a rebuild once a changed layout has been stable across two polls
+    /// (so we don't rebuild repeatedly while Windows is still adding/removing monitors).
+    /// </summary>
+    private void Poll()
     {
-        // Restart the debounce window; Windows fires several of these per change.
-        _debounce.Stop();
-        _debounce.Start();
+        if (_rebuilding || _rebuildRequested) return;
+
+        string current;
+        try { current = Signature(Program.ResolveTargetScreens(_args)); }
+        catch { return; }
+
+        if (current == _builtSignature) { _pendingSignature = ""; return; }
+
+        if (current == _pendingSignature) RequestRebuild();
+        else _pendingSignature = current;
     }
 
-    private void ReconcileLayout()
+    /// <summary>Marshal a rebuild onto the UI thread; WinForms windows must live there.</summary>
+    private void RequestRebuild()
     {
-        if (_rebuilding) return;
-        string current = Signature(Program.ResolveTargetScreens(_args));
-        if (current != _builtSignature)
+        if (_rebuildRequested) return;
+        _rebuildRequested = true;
+        try
         {
-            // Layout drifted from what we built (e.g. a missed event). Debounce a
-            // rebuild so we settle after Windows finishes updating the display set.
-            _debounce.Stop();
-            _debounce.Start();
+            if (_sync.IsHandleCreated && !_sync.IsDisposed)
+                _sync.BeginInvoke(new Action(Rebuild));
+            else
+                _rebuildRequested = false;
         }
+        catch { _rebuildRequested = false; }
     }
 
     private static string Signature(List<Rectangle> targets) =>
@@ -211,6 +241,8 @@ internal sealed class MultiFormContext : ApplicationContext
         finally
         {
             _rebuilding = false;
+            _rebuildRequested = false;
+            _pendingSignature = "";
         }
     }
 }
