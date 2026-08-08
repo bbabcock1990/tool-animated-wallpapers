@@ -1,0 +1,28 @@
+{
+  "id": "azure-updates",
+  "name": "Azure Updates",
+  "description": "Live Azure product updates, filtered to the domains you care about (Compute/Storage/Networking by default), shown left of the calendar.",
+  "assets": {
+    "css": ["overlay.css"],
+    "js": ["overlay.js"]
+  },
+  "toggle": true,
+  "hotkeyDefault": "Ctrl+Alt+U",
+  "refresh": {
+    "everyMinutes": 60,
+    "command": "refresh.ps1"
+  },
+  "tray": {
+    "links": "links.json",
+    "title": "Open Azure update\u2026",
+    "max": 12
+  },
+  "settings": {
+    "domains": ["Compute", "Storage", "Networking"],
+    "position": "left-of-calendar",
+    "offsetX": 0,
+    "offsetY": 0,
+    "status": ["Launched", "In preview", "Retirement"],
+    "maxItems": 8
+  }
+}

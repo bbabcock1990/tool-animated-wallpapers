@@ -1,0 +1,70 @@
+/* ---------- Azure Updates overlay (companion panel) ----------
+ *
+ * A glass panel that mirrors the calendar module's look. Default position snaps
+ * to the LEFT of the calendar (which owns the top-right corner). Position is
+ * data-driven: overlay.js adds a `pos-*` class and an inline transform offset,
+ * so it can be moved by editing config.json + refreshing (mouse drag is not
+ * possible — the wallpaper is a click-through layer behind the desktop icons). */
+.azu {
+  position: fixed; z-index: 4; top: 2.2vh;
+  width: 24vmin; max-width: 440px; min-width: 300px;
+  max-height: 92vh; overflow: hidden;
+  padding: 1.3vmin 1.4vmin; box-sizing: border-box;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(18,26,48,.60), rgba(8,12,26,.48));
+  border: 1px solid rgba(120,170,255,.16);
+  box-shadow: 0 12px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter: blur(14px) saturate(120%);
+  color: #eaf1ff; user-select: none;
+}
+
+/* ---- Position presets (overlay.js applies one of these) ---- */
+/* Mirror the calendar's own width math — width:25vmin clamped to [300px,460px],
+   anchored at right:2vmin — so this panel sits flush to its left without overlap. */
+.azu.pos-left-of-calendar { right: calc(2vmin + clamp(300px, 25vmin, 460px) + 1.6vmin); left: auto; }
+.azu.pos-top-right        { right: 2vmin; left: auto; }
+.azu.pos-top-left         { left: 2vmin;  right: auto; }
+.azu.pos-center-left      { left: 2vmin;  right: auto; top: 50%; }
+.azu.pos-bottom-left      { left: 2vmin;  right: auto; top: auto; bottom: 2.4vh; }
+.azu.pos-bottom-right     { right: 2vmin; left: auto;  top: auto; bottom: 2.4vh; }
+
+.azu-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .8em; }
+.azu-title { font-size: 1.15vmin; font-weight: 600; letter-spacing: .28em;
+             text-transform: uppercase; opacity: .9; }
+.azu-scope { font-size: .74vmin; letter-spacing: .1em; text-transform: uppercase; opacity: .5;
+             max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.azu-list { display: flex; flex-direction: column; gap: .55em; }
+.azu-item {
+  position: relative; padding: .62em .8em; border-radius: 12px;
+  background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06);
+  transition: background .3s, border-color .3s;
+}
+.azu-item .azu-top { display: flex; align-items: center; gap: .5em; margin-bottom: .3em; flex-wrap: wrap; }
+.azu-item .azu-subject { font-size: .95vmin; font-weight: 500; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.azu-item .azu-meta { margin-top: .3em; font-size: .72vmin; opacity: .55;
+  display: flex; align-items: center; gap: .5em; flex-wrap: wrap; }
+
+/* Status pill */
+.azu-pill { font-size: .62vmin; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  padding: .15em .55em; border-radius: 999px; white-space: nowrap; }
+.azu-pill.ga      { background: #3fbf7f; color: #04120a; }
+.azu-pill.preview { background: #ffc45c; color: #1a1204; }
+.azu-pill.dev     { background: rgba(120,180,255,.22); color: #cfe1ff; border: 1px solid rgba(120,180,255,.4); }
+.azu-pill.retire  { background: #ff6b6b; color: #180404; }
+
+/* Domain chip */
+.azu-domain { font-size: .64vmin; letter-spacing: .04em; padding: .12em .55em; border-radius: 999px;
+  background: rgba(120,170,255,.12); border: 1px solid rgba(120,170,255,.20); opacity: .85; white-space: nowrap; }
+
+/* "NEW since last look" emphasis */
+.azu-item.is-new { border-color: rgba(120,180,255,.5); box-shadow: 0 0 22px rgba(70,140,255,.25); }
+.azu-pill.new { background: #4f9cff; color: #04060f; }
+.azu-item.is-retire { border-color: rgba(255,107,107,.45); }
+
+.azu-empty { opacity: .55; font-size: .9vmin; padding: 1em .2em; text-align: center; }
+.azu-foot { margin-top: .8em; font-size: .66vmin; letter-spacing: .1em; text-transform: uppercase;
+  opacity: .4; text-align: right; }
+.azu-foot.warn { color: #ffb27a; opacity: .8; }

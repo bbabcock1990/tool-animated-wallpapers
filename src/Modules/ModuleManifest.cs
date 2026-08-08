@@ -25,6 +25,9 @@ internal sealed class ModuleManifest
     /// <summary>Default global hotkey suggestion (e.g. "Ctrl+Alt+C").</summary>
     public string? HotkeyDefault { get; set; }
 
+    /// <summary>Optional system-tray links submenu (e.g. recent Azure updates to open in a browser).</summary>
+    public ModuleTrayLinks? Tray { get; set; }
+
     /// <summary>Free-form default settings surfaced to the module's JS.</summary>
     public JsonElement? Settings { get; set; }
 
@@ -71,4 +74,23 @@ internal sealed class ModuleRefresh
 
     /// <summary>External command line to run for data refresh (relative to the module dir).</summary>
     public string? Command { get; set; }
+}
+
+/// <summary>
+/// Optional tray "links" submenu for a module. The refresher writes a JSON array
+/// of <c>{ "title", "url", "status" }</c> objects to <see cref="Links"/> (relative
+/// to the module folder); the tray renders them as clickable items that open the
+/// URL in the default browser. This is how a display-only wallpaper panel (which
+/// cannot receive mouse clicks) still lets the user open an item.
+/// </summary>
+internal sealed class ModuleTrayLinks
+{
+    /// <summary>Path (relative to the module dir) of the generated links JSON file.</summary>
+    public string? Links { get; set; }
+
+    /// <summary>Submenu caption. Falls back to the module name when omitted.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Maximum number of links to show. Defaults to 12.</summary>
+    public int Max { get; set; } = 12;
 }

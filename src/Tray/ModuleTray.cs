@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Drawing;
+using System.Text.Json;
 using System.Windows.Forms;
 using HtmlWallpaper.Modules;
 
@@ -54,6 +56,23 @@ internal sealed class ModuleTray : IDisposable
             _menu.Items.Add(item);
         }
         if (toggleable.Count > 0)
+            _menu.Items.Add(new ToolStripSeparator());
+
+        // Link submenus: a module that publishes a tray links file (e.g. azure-updates
+        // writing recent updates) gets a submenu of clickable items that open in the
+        // browser. Populated lazily on open so it always reflects the latest refresh.
+        List<ModuleManifest> linkMods = _registry.Discover()
+            .Where(m => !string.IsNullOrWhiteSpace(m.Tray?.Links)).ToList();
+        foreach (ModuleManifest m in linkMods)
+        {
+            string caption = string.IsNullOrWhiteSpace(m.Tray!.Title) ? m.Name : m.Tray!.Title!;
+            var sub = new ToolStripMenuItem(caption);
+            sub.DropDownItems.Add(new ToolStripMenuItem("(loading\u2026)") { Enabled = false });
+            ModuleManifest captured = m;
+            sub.DropDownOpening += (_, _) => PopulateLinks(sub, captured);
+            _menu.Items.Add(sub);
+        }
+        if (linkMods.Count > 0)
             _menu.Items.Add(new ToolStripSeparator());
 
         _settings = new ToolStripMenuItem("Settings...");
@@ -190,6 +209,66 @@ internal sealed class ModuleTray : IDisposable
             ApplyHotkey();
             SyncChecks();
         }
+    }
+
+    /// <summary>
+    /// Fill a module's links submenu from its generated JSON file (an array of
+    /// { title, url, status } objects). Runs on every open so the newest refresh is
+    /// reflected. Clicking an item opens its URL in the default browser.
+    /// </summary>
+    private static void PopulateLinks(ToolStripMenuItem parent, ModuleManifest m)
+    {
+        parent.DropDownItems.Clear();
+        try
+        {
+            string path = Path.Combine(m.Dir, m.Tray!.Links!);
+            if (!File.Exists(path))
+            {
+                parent.DropDownItems.Add(new ToolStripMenuItem("No updates yet") { Enabled = false });
+                return;
+            }
+
+            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                parent.DropDownItems.Add(new ToolStripMenuItem("No updates yet") { Enabled = false });
+                return;
+            }
+
+            int max = m.Tray!.Max > 0 ? m.Tray!.Max : 12;
+            int shown = 0;
+            foreach (JsonElement el in doc.RootElement.EnumerateArray())
+            {
+                if (shown >= max) break;
+                string url = el.TryGetProperty("url", out JsonElement u) ? (u.GetString() ?? "") : "";
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                string title = el.TryGetProperty("title", out JsonElement t) ? (t.GetString() ?? "") : "";
+                string status = el.TryGetProperty("status", out JsonElement s) ? (s.GetString() ?? "") : "";
+
+                string label = string.IsNullOrWhiteSpace(status) ? title : $"[{status}]  {title}";
+                if (label.Length > 90) label = label.Substring(0, 89) + "\u2026";
+
+                string capturedUrl = url;
+                var item = new ToolStripMenuItem(label);
+                item.Click += (_, _) => OpenUrl(capturedUrl);
+                parent.DropDownItems.Add(item);
+                shown++;
+            }
+
+            if (parent.DropDownItems.Count == 0)
+                parent.DropDownItems.Add(new ToolStripMenuItem("No updates yet") { Enabled = false });
+        }
+        catch
+        {
+            parent.DropDownItems.Clear();
+            parent.DropDownItems.Add(new ToolStripMenuItem("Could not read updates") { Enabled = false });
+        }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* opening a browser is best-effort */ }
     }
 
     private static Icon LoadIcon()

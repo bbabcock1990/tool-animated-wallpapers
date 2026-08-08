@@ -193,6 +193,21 @@ For the MSAL method you can point at an admin-consented app or restrict the tena
 
 > **Note — locked-down tenants:** if your tenant disables user consent (e.g. **microsoft.com**), the generic *Microsoft Graph Command Line Tools* client used by MSAL shows **"Need admin approval"** and can't sign in until an admin consents to it. Use the **WorkIQ** method (or **Auto**), which authenticates through WorkIQ's already-approved app. Token-protection Conditional Access additionally blocks the MSAL **device-code** fallback (WAM still works there).
 
+### The Azure Updates module (`modules/azure-updates/`)
+
+A glass panel that shows **live [Azure product updates](https://azure.microsoft.com/updates/)**, filtered to the domains you care about. It ships defaulting to **Compute / Storage / Networking**, but it's fully domain-agnostic — anyone can pick their own.
+
+```
+HtmlWallpaper.exe module enable azure-updates    # fetch + turn on
+HtmlWallpaper.exe module refresh azure-updates   # pull the latest now
+```
+
+- **Data source:** the public Azure Updates feed (`https://www.microsoft.com/releasecommunications/api/v2/azure`) — no sign-in. Each item shows a status pill (**GA** / **Preview** / **Dev** / **Retiring**), the domain chips it matched, and a relative date. Items you haven't seen before get a **NEW** glow (tracked in the WebView2 `localStorage`).
+- **Pick your domains** — edit `domains` in `modules/azure-updates/config.json` (git-ignored, seeded on first run). Filtering is on the feed's own `productCategories`, so run `powershell -File modules/azure-updates/refresh.ps1 -ListDomains` to print every available domain (Databases, Security, AI + machine learning, …). An empty `domains` list means **all** domains. Also filter by `status` (`Launched` = GA, `In preview`, `In development`, `Retirement`).
+- **Position** — because the wallpaper is a click-through layer behind the icons, the panel can't be mouse-dragged. Instead set `position` in `config.json` (`left-of-calendar` — the default — plus `top-right` / `top-left` / `center-left` / `bottom-left` / `bottom-right`) and optional `offsetX` / `offsetY` pixel nudges; run `module refresh azure-updates` and it moves within seconds. `left-of-calendar` tracks the calendar's own width so the two panels stay flush.
+- **Open an update** — for the same click-through reason the panel is display-only. Two ways to open one in your browser: the system-tray **Azure Updates ▸** submenu lists the current items (click to open), and the refresher also writes a standalone `updates.html` plus an **"Azure Updates"** Start-menu shortcut. Toggle the panel with the tray item or the global hotkey (default **Ctrl+Alt+U**).
+- **Reuse the pattern:** the tray submenu is generic — any module whose `module.json` declares `"tray": { "links": "links.json" }` and writes that file (an array of `{ "title", "url", "status" }`) gets a clickable submenu for free.
+
 ## How it works
 
 Windows 11's modern "raised desktop with layered ShellView" renders the wallpaper differently from older Windows. `Progman` carries `WS_EX_NOREDIRECTIONBITMAP`, `SHELLDLL_DefView` (the icons) is a *layered child* of Progman, and the wallpaper is drawn by a `WorkerW` child of Progman that is z-ordered **under** the icons.
