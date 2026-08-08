@@ -79,7 +79,25 @@
 
   // Boot: the registry.js already loaded via its own tag before us if present,
   // so apply immediately, then keep polling for changes.
+  injectHideStyle();
   applyState();
   reloadRegistry();
   setInterval(reloadRegistry, 2000);
+
+  // One-time style so the host can hide every module panel at once (the "hide all
+  // widgets" hotkey toggles html[data-wp-hidden]). Panels opt in with data-wp-panel;
+  // the base animation/clock are untouched.
+  function injectHideStyle() {
+    if (document.getElementById("wp-hide-style")) return;
+    var st = document.createElement("style");
+    st.id = "wp-hide-style";
+    st.textContent =
+      // "Hide all widgets" — hide every module panel.
+      "html[data-wp-hidden] [data-wp-panel]{display:none !important;}" +
+      // "Clickable mode" — hide only the *interactive* panels (those with a link),
+      // because the front overlay takes them over. Non-interactive panels (e.g. the
+      // calendar) stay on the ambient wallpaper untouched.
+      "html[data-wp-clickmode] [data-wp-panel]:has([data-wp-href]){display:none !important;}";
+    (document.head || document.documentElement).appendChild(st);
+  }
 })();

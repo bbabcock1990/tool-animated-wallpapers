@@ -113,6 +113,22 @@ internal sealed class MultiFormContext : ApplicationContext
     private string _pendingSignature = "";
     private int _generation;
 
+    // Optional interactive overlay (clickable panels in front of the desktop). One
+    // window on the primary monitor; recreated on display changes alongside the
+    // wallpaper windows. Null when the interactive page isn't present.
+    private InteractiveOverlayForm? _overlay;
+
+    // Engine-level global hotkeys:
+    //   _hkClickable — toggle "clickable mode": show the interactive overlay and
+    //                  hide the ambient copies of interactive panels.
+    //   _hkHide      — hide/show all widgets (module panels), leaving the animation.
+    // The combos are user-configurable in the tray's Settings dialog (persisted in
+    // state.json); the tray raises HotkeysChanged and we re-register here.
+    private Tray.GlobalHotkeyWindow? _hkClickable;
+    private Tray.GlobalHotkeyWindow? _hkHide;
+    private bool _clickable;
+    private bool _widgetsHidden;
+
     // Module runtime (tray + in-process data scheduler), owned by the wallpaper
     // process so there is no separate tray process or scheduled task.
     private readonly Modules.ModuleService _moduleService = new();
@@ -138,10 +154,67 @@ internal sealed class MultiFormContext : ApplicationContext
         // Start the module runtime once, after the UI thread/message loop exists.
         StartModuleRuntime();
 
+        // Register the engine hotkeys once (they drive whatever windows exist now
+        // and after any rebuild).
+        StartOverlayHotkeys();
+
         // Poll the live monitor layout every second on a thread-pool timer and rebuild
         // when it drifts from what we drew. Independent of the UI message pump.
         _poll = new System.Threading.Timer(_ => Poll(), null,
             TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StartOverlayHotkeys()
+    {
+        try
+        {
+            _hkClickable = new Tray.GlobalHotkeyWindow();
+            _hkClickable.HotkeyPressed += (_, _) => { _clickable = !_clickable; ApplyOverlayState(); };
+
+            _hkHide = new Tray.GlobalHotkeyWindow();
+            _hkHide.HotkeyPressed += (_, _) => { _widgetsHidden = !_widgetsHidden; ApplyOverlayState(); };
+
+            RegisterOverlayHotkeys();
+
+            // Re-register whenever the user changes them in the Settings dialog.
+            if (_tray != null) _tray.HotkeysChanged += RegisterOverlayHotkeys;
+        }
+        catch { /* hotkeys are a convenience; the wallpaper still runs without them */ }
+    }
+
+    /// <summary>Register (or re-register) the two engine hotkeys from the tray's current values.</summary>
+    private void RegisterOverlayHotkeys()
+    {
+        try
+        {
+            Tray.Hotkey click = _tray?.ClickHotkey ?? Tray.ModuleTray.DefaultClickHotkey;
+            Tray.Hotkey hide = _tray?.HideHotkey ?? Tray.ModuleTray.DefaultHideHotkey;
+            _hkClickable?.Register(click);
+            _hkHide?.Register(hide);
+        }
+        catch { /* ignore */ }
+    }
+
+    /// <summary>
+    /// Reconcile the interactive overlay + ambient panels with the two toggles:
+    ///   - clickable ON  => overlay shown, ambient panels hidden (overlay is the sole
+    ///                       renderer, so there is no double image).
+    ///   - clickable OFF => overlay hidden, ambient panels shown (glanceable).
+    ///   - hide-all      => everything hidden regardless of clickable.
+    /// Safe to call after every Build/Rebuild so a display change preserves state.
+    /// </summary>
+    private void ApplyOverlayState()
+    {
+        bool showOverlay = _clickable && !_widgetsHidden;
+
+        _overlay?.SetVisible(showOverlay);
+        foreach (WallpaperForm form in _forms)
+        {
+            // Hide *all* panels when hiding widgets; otherwise, in clickable mode hide
+            // only the interactive panels the overlay is taking over (no ghosting).
+            form.SetWidgetsHidden(_widgetsHidden);
+            form.SetClickMode(showOverlay);
+        }
     }
 
     private void StartModuleRuntime()
@@ -164,6 +237,9 @@ internal sealed class MultiFormContext : ApplicationContext
             _poll?.Dispose();
             _scheduler?.Dispose();
             _tray?.Dispose();
+            _hkClickable?.Dispose();
+            _hkHide?.Dispose();
+            _overlay?.Dispose();
             _sync?.Dispose();
         }
         base.Dispose(disposing);
@@ -226,6 +302,37 @@ internal sealed class MultiFormContext : ApplicationContext
             _forms.Add(form);
             form.Show();
         }
+
+        BuildOverlay(gen, targets);
+
+        // Re-apply clickable / hidden state to the freshly built windows so a display
+        // change (rebuild) doesn't reset it.
+        ApplyOverlayState();
+    }
+
+    /// <summary>
+    /// Create the interactive overlay on the primary monitor, if the interactive page
+    /// exists next to the wallpaper. Loads the same module runtime, but clickable.
+    /// </summary>
+    private void BuildOverlay(int gen, List<Rectangle> targets)
+    {
+        try
+        {
+            string interactivePage = Path.GetFullPath("overlay-interactive.html");
+            if (!File.Exists(interactivePage)) return;
+
+            // Choose the primary monitor's rectangle (fall back to the first target).
+            List<(Rectangle Bounds, bool Primary)> monitors = Native.EnumerateMonitors();
+            Rectangle primary = monitors.Count > 0
+                ? monitors.FirstOrDefault(m => m.Primary, monitors[0]).Bounds
+                : targets[0];
+            if (!targets.Any(t => t == primary)) primary = targets[0];
+
+            _overlay = new InteractiveOverlayForm(interactivePage, primary, $"overlay_g{gen}");
+            _overlay.FormClosed += (_, _) => { if (!_rebuilding) _overlay = null; };
+            _overlay.Show();
+        }
+        catch { /* overlay is optional; the wallpaper must still run */ }
     }
 
     private void Rebuild()
@@ -233,6 +340,11 @@ internal sealed class MultiFormContext : ApplicationContext
         _rebuilding = true;
         try
         {
+            if (_overlay != null)
+            {
+                try { _overlay.Close(); } catch { /* ignore */ }
+                _overlay = null;
+            }
             foreach (WallpaperForm form in _forms.ToArray())
                 form.Close();
             _forms.Clear();

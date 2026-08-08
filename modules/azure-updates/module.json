@@ -12,11 +12,6 @@
     "everyMinutes": 60,
     "command": "refresh.ps1"
   },
-  "tray": {
-    "links": "links.json",
-    "title": "Open Azure update\u2026",
-    "max": 12
-  },
   "settings": {
     "domains": ["Compute", "Storage", "Networking"],
     "position": "left-of-calendar",

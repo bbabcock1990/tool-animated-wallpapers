@@ -40,6 +40,13 @@
   background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06);
   transition: background .3s, border-color .3s;
 }
+/* Clickable rows (interactive overlay only). Harmless on the ambient wallpaper,
+   which has no cursor and can't be clicked. */
+.azu-item[data-wp-href] { cursor: pointer; }
+.azu-item[data-wp-href]:hover {
+  background: rgba(120,170,255,.14);
+  border-color: rgba(120,180,255,.55);
+}
 .azu-item .azu-top { display: flex; align-items: center; gap: .5em; margin-bottom: .3em; flex-wrap: wrap; }
 .azu-item .azu-subject { font-size: .95vmin; font-weight: 500; line-height: 1.25;
   overflow: hidden; text-overflow: ellipsis; display: -webkit-box;

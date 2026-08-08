@@ -107,6 +107,45 @@ internal static class Native
     [DllImport("user32.dll")]
     internal static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint crKey, byte bAlpha, uint dwFlags);
 
+    // ---- Interactive overlay support (clickable panels in front of the desktop) ----
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr CreateRectRgn(int x1, int y1, int x2, int y2);
+
+    [DllImport("gdi32.dll")]
+    internal static extern int CombineRgn(IntPtr hrgnDest, IntPtr hrgnSrc1, IntPtr hrgnSrc2, int fnCombineMode);
+
+    [DllImport("gdi32.dll")]
+    internal static extern bool DeleteObject(IntPtr hObject);
+
+    internal const int RGN_OR = 2;
+    internal const int SW_HIDE = 0;
+    internal const int WS_EX_TOPMOST = 0x00000008;
+    internal const int WS_EX_TRANSPARENT = 0x00000020;
+    internal const int WS_EX_NOACTIVATE = 0x08000000;
+    internal static readonly IntPtr HWND_TOPMOST = new(-1);
+    internal const uint SWP_NOSIZE_ = 0x0001;
+    internal const uint SWP_SHOWWINDOW = 0x0040;
+
+    /// <summary>Class name of the current foreground window (empty on failure).</summary>
+    internal static string ForegroundClass()
+    {
+        IntPtr fg = GetForegroundWindow();
+        if (fg == IntPtr.Zero) return "";
+        var sb = new System.Text.StringBuilder(256);
+        int n = GetClassName(fg, sb, sb.Capacity);
+        return n > 0 ? sb.ToString() : "";
+    }
+
     internal delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     internal const int GWL_EXSTYLE = -20;

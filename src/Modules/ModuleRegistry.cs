@@ -39,8 +39,9 @@ internal sealed class ModuleState
 
 internal sealed class TraySettings
 {
-    public string? Hotkey { get; set; }
-    public string? HotkeyTarget { get; set; }
+    // Two engine-level global hotkeys (user-customisable in the tray's Settings dialog).
+    public string? ClickHotkey { get; set; }  // toggle "clickable mode" (interact with panels)
+    public string? HideHotkey { get; set; }   // hide / show all module panels
 }
 
 internal sealed class ModulesStateFile
@@ -151,13 +152,5 @@ internal sealed class ModuleRegistry
 
         Directory.CreateDirectory(ModulePaths.ModulesDir);
         File.WriteAllText(ModulePaths.RegistryJs, js, new UTF8Encoding(false));
-    }
-
-    /// <summary>The module a single global hotkey should toggle (settings override, else first toggleable).</summary>
-    public string? ToggleHotkeyTarget()
-    {
-        ModulesStateFile state = LoadState();
-        if (!string.IsNullOrWhiteSpace(state.Tray.HotkeyTarget)) return state.Tray.HotkeyTarget;
-        return Discover().FirstOrDefault(m => m.Toggle)?.Id;
     }
 }

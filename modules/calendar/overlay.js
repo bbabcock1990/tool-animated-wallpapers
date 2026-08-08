@@ -19,6 +19,7 @@
     var cal = document.createElement("div");
     cal.className = "cal";
     cal.id = "cal";
+    cal.setAttribute("data-wp-panel", "calendar");
     cal.innerHTML =
       '<div class="cal-head">' +
         '<div class="cal-title">Today</div>' +

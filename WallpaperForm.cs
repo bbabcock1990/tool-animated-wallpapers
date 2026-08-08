@@ -17,6 +17,9 @@ internal sealed class WallpaperForm : Form
     private readonly string _userDataSubfolder;
     private readonly System.Windows.Forms.Timer _watchdog = new() { Interval = 3000 };
     private IntPtr _desktopLayer = IntPtr.Zero;
+    private bool _ready;
+    private bool _widgetsHidden;
+    private bool _clickMode;
 
     /// <param name="targetBounds">The monitor rectangle (screen coordinates) this window covers.</param>
     /// <param name="userDataSubfolder">Per-window WebView2 user-data subfolder (must be unique per window in the process).</param>
@@ -93,6 +96,10 @@ internal sealed class WallpaperForm : Form
 
         AttachToDesktop();
 
+        _ready = true;
+        ApplyWidgetsHidden();
+        ApplyClickMode();
+
         // Only re-attach when the desktop layer we parented to is actually gone
         // (Explorer restart). GetParent() is unreliable here: for a top-level window
         // re-parented under the Windows 11 "raised desktop", it returns 0 even while we
@@ -119,6 +126,55 @@ internal sealed class WallpaperForm : Form
             string full = Path.GetFullPath(source);
             _webView.CoreWebView2.Navigate(new Uri(full).AbsoluteUri);
         }
+    }
+
+    /// <summary>
+    /// Hide or show this window's module panels (the "widgets"). Used when the user
+    /// turns on clickable mode (the ambient panels are hidden so the interactive
+    /// overlay is the sole renderer — no ghosting) or hides all widgets. The base
+    /// animation/clock are unaffected. Panels opt in by carrying data-wp-panel;
+    /// module-loader.js owns the CSS that reacts to the html[data-wp-hidden] flag.
+    /// </summary>
+    public void SetWidgetsHidden(bool hidden)
+    {
+        _widgetsHidden = hidden;
+        ApplyWidgetsHidden();
+    }
+
+    private void ApplyWidgetsHidden()
+    {
+        if (!_ready) return;
+        try
+        {
+            string on = _widgetsHidden ? "true" : "false";
+            _webView.CoreWebView2.ExecuteScriptAsync(
+                $"document.documentElement.toggleAttribute('data-wp-hidden', {on});");
+        }
+        catch { /* best effort — the panel simply stays as-is */ }
+    }
+
+    /// <summary>
+    /// Enter/leave "clickable mode". When on, the ambient copies of *interactive*
+    /// panels (those with a link) are hidden because the front interactive overlay
+    /// renders them instead — this prevents a ghosted double image. Non-interactive
+    /// panels (e.g. the calendar) are untouched.
+    /// </summary>
+    public void SetClickMode(bool on)
+    {
+        _clickMode = on;
+        ApplyClickMode();
+    }
+
+    private void ApplyClickMode()
+    {
+        if (!_ready) return;
+        try
+        {
+            string on = _clickMode ? "true" : "false";
+            _webView.CoreWebView2.ExecuteScriptAsync(
+                $"document.documentElement.toggleAttribute('data-wp-clickmode', {on});");
+        }
+        catch { /* best effort */ }
     }
 
     /// <summary>Parent this form to the desktop wallpaper layer (below the icons).</summary>

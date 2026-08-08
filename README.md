@@ -202,11 +202,29 @@ HtmlWallpaper.exe module enable azure-updates    # fetch + turn on
 HtmlWallpaper.exe module refresh azure-updates   # pull the latest now
 ```
 
-- **Data source:** the public Azure Updates feed (`https://www.microsoft.com/releasecommunications/api/v2/azure`) — no sign-in. Each item shows a status pill (**GA** / **Preview** / **Dev** / **Retiring**), the domain chips it matched, and a relative date. Items you haven't seen before get a **NEW** glow (tracked in the WebView2 `localStorage`).
+- **Data source:** the public **[Azure updates RSS feed](https://www.microsoft.com/releasecommunications/api/v2/azure/rss)** (`…/releasecommunications/api/v2/azure/rss`) — no sign-in, newest-first. Each item shows a status pill (**GA** / **Preview** / **Dev** / **Retiring**), the domain chips it matched, and a relative date. Items you haven't seen before get a **NEW** glow (tracked in the WebView2 `localStorage`).
 - **Pick your domains** — edit `domains` in `modules/azure-updates/config.json` (git-ignored, seeded on first run). Filtering is on the feed's own `productCategories`, so run `powershell -File modules/azure-updates/refresh.ps1 -ListDomains` to print every available domain (Databases, Security, AI + machine learning, …). An empty `domains` list means **all** domains. Also filter by `status` (`Launched` = GA, `In preview`, `In development`, `Retirement`).
 - **Position** — because the wallpaper is a click-through layer behind the icons, the panel can't be mouse-dragged. Instead set `position` in `config.json` (`left-of-calendar` — the default — plus `top-right` / `top-left` / `center-left` / `bottom-left` / `bottom-right`) and optional `offsetX` / `offsetY` pixel nudges; run `module refresh azure-updates` and it moves within seconds. `left-of-calendar` tracks the calendar's own width so the two panels stay flush.
-- **Open an update** — for the same click-through reason the panel is display-only. Two ways to open one in your browser: the system-tray **Azure Updates ▸** submenu lists the current items (click to open), and the refresher also writes a standalone `updates.html` plus an **"Azure Updates"** Start-menu shortcut. Toggle the panel with the tray item or the global hotkey (default **Ctrl+Alt+U**).
+- **Open an update** — the *interactive overlay* (see below) makes each row a clickable link: press the **clickable-mode hotkey (Ctrl+Alt+K)** and click a card to open it in your browser. The refresher also writes a standalone `updates.html` plus an **"Azure Updates"** Start-menu shortcut as an always-available fallback. Toggle the panel itself with the tray item or the global hotkey (default **Ctrl+Alt+U**).
 - **Reuse the pattern:** the tray submenu is generic — any module whose `module.json` declares `"tray": { "links": "links.json" }` and writes that file (an array of `{ "title", "url", "status" }`) gets a clickable submenu for free.
+
+### The interactive overlay (clickable panels)
+
+The wallpaper itself is a click-through layer parented **behind** the desktop icons, so it can never receive a mouse click. To make panels clickable, the app also renders a second, transparent, **top-most window in front of the desktop** (`overlay-interactive.html`) hosting the *same* modules. It's clipped with `SetWindowRgn` so only the interactive panel rectangles are "solid" — every other pixel passes straight through to the desktop and your icons — and clicking a link posts the URL to the host, which opens it in your browser.
+
+Two global hotkeys drive it (they never steal focus from the app you're using):
+
+| Hotkey | Action |
+| --- | --- |
+| **Ctrl+Alt+K** | Toggle **clickable mode** — show the overlay so panels can be clicked. While on, the ambient copy of each interactive panel is hidden so the overlay is the *sole* renderer (no ghosted double image). |
+| **Ctrl+Alt+H** | **Hide / show all widgets** — hide every module panel (the base animation and clock stay), e.g. for a clean screen-share. |
+
+This is a **shared engine capability** — any module opts in purely by tagging its DOM, no host code required:
+
+- put `data-wp-panel` on the panel's root element (so it participates in hide-all and, if it has links, gets clipped into the clickable overlay), and
+- put `data-wp-href="https://…"` on any element that should open a link when clicked.
+
+Panels with **no** links (e.g. the calendar) stay on the ambient wallpaper untouched in clickable mode. The same tagged markup is inert on the ambient wallpaper (which can't be clicked) and live on the overlay, so a module writes it once. The overlay lives on the **primary monitor** and rebuilds automatically with the wallpaper on display changes.
 
 ## How it works
 

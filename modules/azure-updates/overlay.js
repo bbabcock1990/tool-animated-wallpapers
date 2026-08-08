@@ -29,6 +29,7 @@
     var el = document.createElement("div");
     el.className = "azu";
     el.id = "azu";
+    el.setAttribute("data-wp-panel", "azure-updates");
     el.innerHTML =
       '<div class="azu-head">' +
         '<div class="azu-title">Azure Updates</div>' +
@@ -113,6 +114,9 @@
 
       var row = document.createElement("div");
       row.className = "azu-item" + (isNew ? " is-new" : "") + (isRetire ? " is-retire" : "");
+      // Interactive overlay: make the whole row a clickable link. Inert on the
+      // ambient wallpaper (which can't receive clicks); the front overlay routes it.
+      if (it.url) row.setAttribute("data-wp-href", it.url);
 
       var top = document.createElement("div");
       top.className = "azu-top";

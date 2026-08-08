@@ -21,11 +21,23 @@ internal sealed class ModuleTray : IDisposable
     private readonly Dictionary<string, ToolStripMenuItem> _items = new(StringComparer.OrdinalIgnoreCase);
     private readonly ToolStripMenuItem _settings;
     private readonly System.Windows.Forms.Timer _sync;
-    private readonly GlobalHotkeyWindow _hk;
     private readonly Form _owner;
 
-    private Hotkey _hotkey = Hotkey.Default;
-    private string? _hotkeyTarget;
+    // The two engine-level hotkeys. The tray persists them and raises HotkeysChanged;
+    // the host (MultiFormContext) owns registration + the actions they trigger.
+    private Hotkey _clickHotkey;
+    private Hotkey _hideHotkey;
+
+    /// <summary>Default clickable-mode hotkey (used when nothing is persisted).</summary>
+    public static Hotkey DefaultClickHotkey => Hotkey.Parse("Ctrl+Alt+K");
+    /// <summary>Default hide-all-widgets hotkey (used when nothing is persisted).</summary>
+    public static Hotkey DefaultHideHotkey => Hotkey.Parse("Ctrl+Alt+H");
+
+    public Hotkey ClickHotkey => _clickHotkey;
+    public Hotkey HideHotkey => _hideHotkey;
+
+    /// <summary>Raised after the user saves new hotkeys, so the host can re-register them.</summary>
+    public event Action? HotkeysChanged;
 
     public ModuleTray(ModuleService service)
     {
@@ -58,9 +70,8 @@ internal sealed class ModuleTray : IDisposable
         if (toggleable.Count > 0)
             _menu.Items.Add(new ToolStripSeparator());
 
-        // Link submenus: a module that publishes a tray links file (e.g. azure-updates
-        // writing recent updates) gets a submenu of clickable items that open in the
-        // browser. Populated lazily on open so it always reflects the latest refresh.
+        // Link submenus: a module that publishes a tray links file gets a submenu of
+        // clickable items that open in the browser. Populated lazily on open.
         List<ModuleManifest> linkMods = _registry.Discover()
             .Where(m => !string.IsNullOrWhiteSpace(m.Tray?.Links)).ToList();
         foreach (ModuleManifest m in linkMods)
@@ -93,14 +104,12 @@ internal sealed class ModuleTray : IDisposable
         };
         _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) _menu.Show(Cursor.Position); };
 
-        // Load persisted hotkey + target.
+        // Load persisted hotkeys (fall back to defaults).
         ModulesStateFile state = _registry.LoadState();
-        _hotkey = Hotkey.Parse(state.Tray.Hotkey ?? toggleable.FirstOrDefault()?.HotkeyDefault);
-        _hotkeyTarget = state.Tray.HotkeyTarget ?? toggleable.FirstOrDefault()?.Id;
-
-        _hk = new GlobalHotkeyWindow();
-        _hk.HotkeyPressed += async (_, _) => await ToggleHotkeyTargetAsync();
-        ApplyHotkey();
+        _clickHotkey = string.IsNullOrWhiteSpace(state.Tray.ClickHotkey)
+            ? DefaultClickHotkey : Hotkey.Parse(state.Tray.ClickHotkey);
+        _hideHotkey = string.IsNullOrWhiteSpace(state.Tray.HideHotkey)
+            ? DefaultHideHotkey : Hotkey.Parse(state.Tray.HideHotkey);
 
         _sync = new System.Windows.Forms.Timer { Interval = 2000 };
         _sync.Tick += (_, _) => SyncChecks();
@@ -124,35 +133,17 @@ internal sealed class ModuleTray : IDisposable
         SyncChecks();
     }
 
-    private async Task ToggleHotkeyTargetAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_hotkeyTarget)) return;
-        await ToggleModuleAsync(_hotkeyTarget);
-    }
-
     private void SyncChecks()
     {
         foreach (KeyValuePair<string, ToolStripMenuItem> kv in _items)
             kv.Value.Checked = _service.IsEnabled(kv.Key);
-        _settings.Text = $"Settings (hotkey: {_hotkey})...";
-    }
-
-    private void ApplyHotkey()
-    {
-        bool ok = _hk.Register(_hotkey);
-        if (!ok)
-        {
-            _icon.ShowBalloonTip(4000, "Hotkey unavailable",
-                $"Could not register {_hotkey}. Another app may use it. Pick another combo in Settings.",
-                ToolTipIcon.Warning);
-        }
     }
 
     private void SaveTraySettings()
     {
         ModulesStateFile state = _registry.LoadState();
-        state.Tray.Hotkey = _hotkey.ToString();
-        state.Tray.HotkeyTarget = _hotkeyTarget;
+        state.Tray.ClickHotkey = _clickHotkey.ToString();
+        state.Tray.HideHotkey = _hideHotkey.ToString();
         _registry.SaveState(state);
     }
 
@@ -165,50 +156,62 @@ internal sealed class ModuleTray : IDisposable
             StartPosition = FormStartPosition.CenterScreen,
             MaximizeBox = false,
             MinimizeBox = false,
-            ClientSize = new Size(400, 230),
+            ClientSize = new Size(420, 250),
             TopMost = true,
         };
 
-        var lblTarget = new Label { Text = "Hotkey toggles module:", AutoSize = true, Location = new Point(15, 18) };
-        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(15, 42), Width = 370 };
-        List<ModuleManifest> toggleable = _registry.Discover().Where(m => m.Toggle).ToList();
-        foreach (ModuleManifest m in toggleable) combo.Items.Add(m.Id);
-        combo.SelectedItem = _hotkeyTarget is not null && combo.Items.Contains(_hotkeyTarget) ? _hotkeyTarget : (combo.Items.Count > 0 ? combo.Items[0] : null);
+        var lblClick = new Label { Text = "Enable clicking (interact with panels) - click the box and press a combo:", AutoSize = true, Location = new Point(15, 18) };
+        var tbClick = new TextBox { ReadOnly = true, Location = new Point(15, 42), Width = 390, TextAlign = HorizontalAlignment.Center, Text = _clickHotkey.ToString() };
 
-        var lblHk = new Label { Text = "Toggle hotkey - click the box and press a combo (e.g. Ctrl+Alt+C):", AutoSize = true, Location = new Point(15, 82) };
-        var tb = new TextBox { ReadOnly = true, Location = new Point(15, 106), Width = 370, TextAlign = HorizontalAlignment.Center, Text = _hotkey.ToString() };
-        var hint = new Label { Text = "Requires at least one of Ctrl / Alt / Shift plus a key.", AutoSize = true, ForeColor = Color.Gray, Location = new Point(15, 136) };
+        var lblHide = new Label { Text = "Hide / show all widgets - click the box and press a combo:", AutoSize = true, Location = new Point(15, 86) };
+        var tbHide = new TextBox { ReadOnly = true, Location = new Point(15, 110), Width = 390, TextAlign = HorizontalAlignment.Center, Text = _hideHotkey.ToString() };
 
-        Hotkey captured = _hotkey;
-        tb.KeyDown += (_, e) =>
-        {
-            e.SuppressKeyPress = true;
-            Keys kc = e.KeyCode;
-            if (kc is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin) return;
-            captured = new Hotkey { Ctrl = e.Control, Alt = e.Alt, Shift = e.Shift, Win = false, Key = kc };
-            tb.Text = captured.ToString();
-        };
+        var hint = new Label { Text = "Requires at least one of Ctrl / Alt / Shift plus a key.", AutoSize = true, ForeColor = Color.Gray, Location = new Point(15, 150) };
 
-        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(215, 185) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(305, 185) };
-        form.Controls.AddRange(new Control[] { lblTarget, combo, lblHk, tb, hint, ok, cancel });
+        Hotkey capturedClick = _clickHotkey;
+        Hotkey capturedHide = _hideHotkey;
+        CaptureInto(tbClick, hk => capturedClick = hk);
+        CaptureInto(tbHide, hk => capturedHide = hk);
+
+        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(235, 205) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(325, 205) };
+        form.Controls.AddRange(new Control[] { lblClick, tbClick, lblHide, tbHide, hint, ok, cancel });
         form.AcceptButton = ok;
         form.CancelButton = cancel;
 
         if (form.ShowDialog(_owner) == DialogResult.OK)
         {
-            if (!captured.HasModifier)
+            if (!capturedClick.HasModifier || !capturedHide.HasModifier)
             {
-                MessageBox.Show(_owner, "Please include at least one modifier (Ctrl, Alt or Shift).",
+                MessageBox.Show(_owner, "Each hotkey needs at least one modifier (Ctrl, Alt or Shift).",
                     "Invalid hotkey", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            _hotkey = captured;
-            _hotkeyTarget = combo.SelectedItem as string;
+            if (capturedClick.ToString() == capturedHide.ToString())
+            {
+                MessageBox.Show(_owner, "The two hotkeys must be different.",
+                    "Invalid hotkey", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            _clickHotkey = capturedClick;
+            _hideHotkey = capturedHide;
             SaveTraySettings();
-            ApplyHotkey();
-            SyncChecks();
+            HotkeysChanged?.Invoke();
         }
+    }
+
+    /// <summary>Wire a read-only textbox to capture a pressed key-combo into a setter.</summary>
+    private static void CaptureInto(TextBox tb, Action<Hotkey> set)
+    {
+        tb.KeyDown += (_, e) =>
+        {
+            e.SuppressKeyPress = true;
+            Keys kc = e.KeyCode;
+            if (kc is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin) return;
+            var hk = new Hotkey { Ctrl = e.Control, Alt = e.Alt, Shift = e.Shift, Win = false, Key = kc };
+            set(hk);
+            tb.Text = hk.ToString();
+        };
     }
 
     /// <summary>
@@ -300,7 +303,6 @@ internal sealed class ModuleTray : IDisposable
     {
         _sync.Stop();
         _sync.Dispose();
-        _hk.Dispose();
         _icon.Visible = false;
         _icon.Dispose();
         _menu.Dispose();
