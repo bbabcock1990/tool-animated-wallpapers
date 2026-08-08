@@ -1,6 +1,7 @@
 # Build output
 bin/
 obj/
+publish/
 
 # User-specific
 *.user
@@ -11,6 +12,8 @@ modules/state.json
 modules/registry.js
 modules/*/config.json
 modules/*/data.js
+modules/*/links.json
+modules/*/updates.html
 modules/*/calendar-token.bin*
 modules/**/*.log
 modules/**/*.err

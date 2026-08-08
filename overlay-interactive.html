@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wallpaper Interactive Overlay</title>
+<style>
+  /* Transparent surface: only the module panels paint; everything else is
+     click-through to the desktop (the host clips the window to the panels). */
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent !important;
+    overflow: hidden;
+  }
+  /* Anything a module marks as a link is obviously clickable here. */
+  [data-wp-href] { cursor: pointer; }
+</style>
+</head>
+<body>
+  <!-- Interactive twin of wallpaper.html: no base animation, just the modules,
+       rendered in front of the desktop so their panels can be clicked. -->
+  <script>window.WALLPAPER_INTERACTIVE = true;</script>
+  <script src="module-loader.js"></script>
+  <script src="interactive.js"></script>
+</body>
+</html>
