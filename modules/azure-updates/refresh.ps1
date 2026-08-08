@@ -25,8 +25,19 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ApiUrl     = 'https://www.microsoft.com/releasecommunications/api/v2/azure'
+$RssUrl     = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss'
 $UpdateBase = 'https://azure.microsoft.com/en-us/updates/?id='
+
+# Known Azure Updates domains (the feed's productCategories). Used only to tell
+# domains apart from products/tags in the RSS <category> list (for the -ListDomains
+# helper and the on-panel chips). Filtering itself matches ANY category, so a user
+# can still pick a value that isn't in this list.
+$KnownDomains = @(
+  'AI + machine learning','Analytics','Compute','Containers','Databases',
+  'Developer tools','DevOps','Hybrid + multicloud','Identity','Integration',
+  'Internet of Things','Management and governance','Media','Migration','Mixed reality',
+  'Mobile','Networking','Security','Storage','Virtual desktop infrastructure','Web','Windows'
+)
 
 function Write-Utf8NoBom {
   param([string]$Path, [string]$Content)
@@ -65,98 +76,114 @@ $statuses = @($cfg.status)   | Where-Object { $_ }
 $maxItems = [int]$cfg.maxItems
 if ($maxItems -le 0) { $maxItems = 8 }
 
-# ---- Fetch feed ----------------------------------------------------------------
-$headers = @{ 'Accept' = 'application/json'; 'User-Agent' = 'HtmlWallpaper-AzureUpdates/1.0' }
-$resp    = Invoke-RestMethod -Uri $ApiUrl -Headers $headers -TimeoutSec 60
-$items   = @($resp.value)
-if ($items.Count -eq 0) { throw 'Azure Updates feed returned no items.' }
+# ---- Fetch feed (RSS: newest-first, unlike the unordered JSON endpoint) ---------
+$headers = @{ 'Accept' = 'application/rss+xml'; 'User-Agent' = 'HtmlWallpaper-AzureUpdates/1.0' }
+$txt     = (Invoke-WebRequest -Uri $RssUrl -Headers $headers -TimeoutSec 60 -UseBasicParsing).Content
+$txt     = $txt.TrimStart([char]0xFEFF, [char]0xEF, [char]0xBB, [char]0xBF)   # strip UTF-8 BOM
+$xml     = New-Object System.Xml.XmlDocument
+$xml.LoadXml($txt)
+$items   = @($xml.rss.channel.item)
+if ($items.Count -eq 0) { throw 'Azure Updates RSS feed returned no items.' }
+
+# Read an item's <category> values as a plain string array. PowerShell surfaces a
+# text-only XML element as a string, but as an XmlElement when it carries attributes,
+# so handle both.
+function Get-Categories {
+  param($item)
+  @(@($item.category) | ForEach-Object {
+    if ($_ -is [string]) { $_ } elseif ($_.'#text') { [string]$_.'#text' } else { "$_" }
+  } | Where-Object { $_ })
+}
 
 # ---- -ListDomains helper: discover every domain a user could pick --------------
 if ($ListDomains) {
-  Write-Output 'Domains available in the Azure Updates feed (productCategories):'
-  $items.productCategories | Where-Object { $_ } | Group-Object |
+  Write-Output 'Domains available in the Azure Updates feed:'
+  $items | ForEach-Object { Get-Categories $_ } |
+    Where-Object { $KnownDomains -contains $_ } | Group-Object |
     Sort-Object Count -Descending |
-    ForEach-Object { '{0,4}  {1}' -f $_.Count, $_.Name } |
-    ForEach-Object { Write-Output $_ }
+    ForEach-Object { Write-Output ('{0,4}  {1}' -f $_.Count, $_.Name) }
   return
 }
 
 # ---- Classify + filter ---------------------------------------------------------
 function Get-StatusInfo {
-  param($item)
-  $tags  = @($item.tags)
-  $title = [string]$item.title
-  $isRetire = ($tags -contains 'Retirements') -or ($title -match '(?i)\bretir|\bdeprecat|end of support|end-of-life')
-  if ($isRetire) { return [pscustomobject]@{ Key = 'Retirement'; Label = 'Retiring'; Class = 'retire' } }
-  switch ($item.status) {
-    'Launched'       { return [pscustomobject]@{ Key = 'Launched';       Label = 'GA';      Class = 'ga' } }
-    'In preview'     { return [pscustomobject]@{ Key = 'In preview';     Label = 'Preview'; Class = 'preview' } }
-    'In development' { return [pscustomobject]@{ Key = 'In development'; Label = 'Dev';     Class = 'dev' } }
-    default          { return [pscustomobject]@{ Key = [string]$item.status; Label = [string]$item.status; Class = 'dev' } }
-  }
+  param($cats, [string]$title)
+  $isRetire = ($cats -contains 'Retirements') -or ($title -match '(?i)\bretir|\bdeprecat|end of support|end-of-life')
+  if ($isRetire)                      { return [pscustomobject]@{ Key = 'Retirement';     Label = 'Retiring'; Class = 'retire' } }
+  if ($cats -contains 'Launched')     { return [pscustomobject]@{ Key = 'Launched';       Label = 'GA';      Class = 'ga' } }
+  if ($cats -contains 'In preview')   { return [pscustomobject]@{ Key = 'In preview';     Label = 'Preview'; Class = 'preview' } }
+  if ($cats -contains 'In development'){ return [pscustomobject]@{ Key = 'In development'; Label = 'Dev';     Class = 'dev' } }
+  return [pscustomobject]@{ Key = 'In development'; Label = 'Update'; Class = 'dev' }
 }
 
 function Test-DomainMatch {
-  param($item, $domains)
+  param($cats, $domains)
   if ($domains.Count -eq 0) { return $true }              # empty = all domains
-  $cats = @($item.productCategories)
-  $prods = @($item.products)
   foreach ($d in $domains) {
-    foreach ($c in $cats)  { if ($c -and ($c -ieq $d)) { return $true } }
-    foreach ($p in $prods) { if ($p -and ($p -like "*$d*")) { return $true } }
+    foreach ($c in $cats) {
+      if ($c -and (($c -ieq $d) -or ($c -like "*$d*"))) { return $true }
+    }
   }
   return $false
 }
 
 function Get-MatchedDomains {
-  param($item, $domains)
-  $cats = @($item.productCategories) | Where-Object { $_ }
-  if ($domains.Count -eq 0) { return @($cats | Select-Object -First 2) }
+  param($cats, $domains)
+  $known = @($cats | Where-Object { $KnownDomains -contains $_ })
+  if ($domains.Count -eq 0) { return @($known | Select-Object -First 2) }
   $out = @()
   foreach ($d in $domains) {
-    foreach ($c in $cats) { if ($c -ieq $d -and ($out -notcontains $c)) { $out += $c } }
+    foreach ($c in $cats) { if (($c -ieq $d) -and ($out -notcontains $c)) { $out += $c } }
   }
-  if ($out.Count -eq 0) { $out = @($cats | Select-Object -First 2) }
+  if ($out.Count -eq 0) { $out = @($known | Select-Object -First 2) }
   return @($out | Select-Object -First 3)
 }
 
 function Get-CleanTitle {
   param([string]$title)
-  ($title -replace '(?i)^\s*(Generally Available|General Availability|Public Preview|Private Preview|In development|Now available|Retirement)\s*:\s*', '').Trim()
+  # RSS titles carry a status prefix (e.g. "[In preview] Public Preview: ..."); drop it.
+  $t = $title -replace '(?i)^\s*\[[^\]]+\]\s*', ''
+  $t = $t -replace '(?i)^\s*(Generally Available|General Availability|Public Preview|Private Preview|In development|Now available|Retirement|Retirements|Announcing)\s*:\s*', ''
+  $t.Trim()
 }
 
-function Get-BestDate {
-  param($item)
-  if ($item.modified) { return [string]$item.modified }
-  if ($item.created)  { return [string]$item.created }
-  return $null
+function Get-IsoDate {
+  param([string]$pubDate)
+  try   { return ([datetimeoffset]::Parse($pubDate)).UtcDateTime.ToString('o') }
+  catch { try { return ([datetime]$pubDate).ToUniversalTime().ToString('o') } catch { return $null } }
 }
 
 $rows = @()
 foreach ($it in $items) {
-  $si = Get-StatusInfo $it
+  $cats  = Get-Categories $it
+  $title = [string]$it.title
+  $si    = Get-StatusInfo $cats $title
   if (($statuses.Count -gt 0) -and ($statuses -notcontains $si.Key)) { continue }
-  if (-not (Test-DomainMatch $it $domains)) { continue }
+  if (-not (Test-DomainMatch $cats $domains)) { continue }
 
-  $date = Get-BestDate $it
+  $id   = $it.guid
+  if ($id -isnot [string]) { $id = if ($it.guid.'#text') { [string]$it.guid.'#text' } else { "$($it.guid)" } }
+  $url  = if ($it.link) { [string]$it.link } else { $UpdateBase + $id }
+  $date = Get-IsoDate ([string]$it.pubDate)
   $sort = if ($date) { [datetime]$date } else { [datetime]'1900-01-01' }
 
   $rows += [pscustomobject]@{
-    id          = [string]$it.id
-    title       = Get-CleanTitle ([string]$it.title)
-    url         = $UpdateBase + [string]$it.id
+    id          = $id
+    title       = Get-CleanTitle $title
+    url         = $url
     statusKey   = $si.Key
     statusLabel = $si.Label
     statusClass = $si.Class
     isRetire    = ($si.Class -eq 'retire')
-    domains     = @(Get-MatchedDomains $it $domains)
+    domains     = @(Get-MatchedDomains $cats $domains)
     date        = $date
     _sort       = $sort
   }
 }
 
-# Retirements first, then newest by modified date.
-$rows = @($rows | Sort-Object @{ Expression = 'isRetire'; Descending = $true }, @{ Expression = '_sort'; Descending = $true })
+# Newest first by publish date (retirements keep their red pill but are not
+# force-pinned, so the panel always reflects the latest updates).
+$rows = @($rows | Sort-Object @{ Expression = '_sort'; Descending = $true })
 $top  = @($rows | Select-Object -First $maxItems)
 
 # ---- Write data.js (overlay panel) ---------------------------------------------
