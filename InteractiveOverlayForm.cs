@@ -237,15 +237,25 @@ internal sealed class InteractiveOverlayForm : Form
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)) return;
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return;
 
-        // Outlook calendar links: prefer the installed "new" Outlook desktop app
-        // (ms-outlook: — never classic Outlook), and only fall back to opening the
-        // web link in the browser when that app isn't available. The new Outlook
-        // has no supported deep link to a specific event, so it opens the app; the
-        // web fallback still lands on the exact meeting.
-        if (IsOutlookCalendarLink(uri) && TryOpenInNewOutlook())
+        // Outlook calendar links: open the *specific* meeting in the "new" Outlook
+        // desktop app. The app registers an App URI Handler for its own hosts and
+        // the "/calendar/applink/read/{id}" path, so shell-executing that URL is
+        // routed by Windows straight into the app (never the browser, never classic
+        // Outlook). When the new Outlook isn't installed we fall back to the event's
+        // original web link, which also targets the exact meeting.
+        if (IsOutlookCalendarLink(uri))
+        {
+            string? appLink = TryBuildCalendarAppLink(uri);
+            if (appLink != null && IsNewOutlookInstalled())
+            {
+                OpenViaShell(appLink);
+                return;
+            }
+            OpenViaShell(uri.AbsoluteUri);
             return;
+        }
 
-        OpenInBrowser(uri.AbsoluteUri);
+        OpenViaShell(uri.AbsoluteUri);
     }
 
     /// <summary>True for an Outlook/OWA calendar-item URL (e.g. an event's Graph webLink).</summary>
@@ -263,25 +273,48 @@ internal sealed class InteractiveOverlayForm : Form
     }
 
     /// <summary>
-    /// Launch the "new" Outlook for Windows via its <c>ms-outlook:</c> protocol.
-    /// Returns false (so the caller can fall back to the browser) if no handler is
-    /// registered — i.e. the new Outlook isn't installed.
+    /// Turn an event's Graph <c>webLink</c> (…/owa/?itemid=…) into the new Outlook
+    /// App URI Handler deep link <c>https://{host}/calendar/applink/read/{itemid}</c>,
+    /// which opens that specific event in the desktop app. Returns null when the URL
+    /// carries no <c>itemid</c> to open.
     /// </summary>
-    private static bool TryOpenInNewOutlook()
+    private static string? TryBuildCalendarAppLink(Uri uri)
+    {
+        string? id = GetQueryValueRaw(uri.Query, "itemid");
+        if (string.IsNullOrEmpty(id)) return null;
+        // `id` keeps its original percent-encoding, which is valid in a path segment.
+        return $"https://{uri.Host}/calendar/applink/read/{id}";
+    }
+
+    /// <summary>Return a query parameter's raw (still percent-encoded) value, or null.</summary>
+    private static string? GetQueryValueRaw(string query, string key)
+    {
+        foreach (string part in query.TrimStart('?').Split('&'))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            if (string.Equals(part.Substring(0, eq), key, StringComparison.OrdinalIgnoreCase))
+                return part.Substring(eq + 1);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// True when the "new" Outlook for Windows is installed — detected via its
+    /// <c>ms-outlook:</c> protocol registration. Used to decide whether to route a
+    /// calendar link into the app or fall back to the browser.
+    /// </summary>
+    private static bool IsNewOutlookInstalled()
     {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "ms-outlook:",
-                UseShellExecute = true
-            });
-            return true;
+            using var key = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("ms-outlook");
+            return key != null;
         }
         catch { return false; }
     }
 
-    private static void OpenInBrowser(string url)
+    private static void OpenViaShell(string url)
     {
         try
         {
