@@ -74,6 +74,7 @@
       chip.className = 'chip';
       chip.textContent = e.subject;
       if (e.location) chip.title = e.location;
+      if (e.webLink) chip.setAttribute('data-wp-href', e.webLink);
       alldayEl.appendChild(chip);
     }
 
@@ -94,6 +95,7 @@
 
       var row = document.createElement('div');
       row.className = 'ev' + (e.isCancelled ? ' cancelled' : isNow ? ' now' : isPast ? ' past' : isNext ? ' next' : '');
+      if (e.webLink) row.setAttribute('data-wp-href', e.webLink);
 
       var when = document.createElement('div');
       when.className = 'when';

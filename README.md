@@ -187,7 +187,7 @@ HtmlWallpaper.exe module enable calendar --auth msal      # Windows broker / MSA
 | **WorkIQ** | Runs the [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq) CLI (`npx @microsoft/workiq call-function`), reusing your existing Windows/WAM M365 sign-in through an app registration that's **already admin-approved** in locked-down tenants. Needs Node.js. | **microsoft.com** and other tenants where generic Graph clients require admin consent |
 | **MSAL** | MSAL.NET: the **Windows broker (WAM)** first, then **device-code**, with a DPAPI token cache (`modules/calendar/calendar-token.bin`) for silent refresh. No Node.js. | Tenants where the Graph client is consentable, or machines without Node.js |
 
-**Auto** (the default) tries **WorkIQ first, then MSAL** — so it works out of the box on locked-down tenants but still functions without Node.js. Your choice is saved to `modules/calendar/config.json` (git-ignored) so the 15-minute background refresh reuses it. Events come from Microsoft Graph (`me/calendarView`) and are written to `modules/calendar/data.js` (`window.CALENDAR_DATA`, git-ignored — it's your personal calendar). Toggle the panel any time with the tray item or the global hotkey (default **Ctrl+Alt+C**); change the hotkey in the tray's **Settings…** dialog.
+**Auto** (the default) tries **WorkIQ first, then MSAL** — so it works out of the box on locked-down tenants but still functions without Node.js. Your choice is saved to `modules/calendar/config.json` (git-ignored) so the 15-minute background refresh reuses it. Events come from Microsoft Graph (`me/calendarView`) and are written to `modules/calendar/data.js` (`window.CALENDAR_DATA`, git-ignored — it's your personal calendar). Each event's Graph `webLink` is captured too, so in **clickable mode** (**Ctrl+Alt+K**) clicking a meeting opens it in Outlook. Toggle the panel with the tray item, and hide/show all widgets with **Ctrl+Alt+H**; customize both hotkeys in the tray's **Settings…** dialog.
 
 For the MSAL method you can point at an admin-consented app or restrict the tenant via the manifest `settings` (`clientId`, `tenant`, `scopes`).
 
@@ -224,7 +224,7 @@ This is a **shared engine capability** — any module opts in purely by tagging 
 - put `data-wp-panel` on the panel's root element (so it participates in hide-all and, if it has links, gets clipped into the clickable overlay), and
 - put `data-wp-href="https://…"` on any element that should open a link when clicked.
 
-Panels with **no** links (e.g. the calendar) stay on the ambient wallpaper untouched in clickable mode. The same tagged markup is inert on the ambient wallpaper (which can't be clicked) and live on the overlay, so a module writes it once. The overlay lives on the **primary monitor** and rebuilds automatically with the wallpaper on display changes.
+Panels with **no** links stay on the ambient wallpaper untouched in clickable mode. The same tagged markup is inert on the ambient wallpaper (which can't be clicked) and live on the overlay, so a module writes it once. The overlay lives on the **primary monitor** and rebuilds automatically with the wallpaper on display changes.
 
 ## How it works
 

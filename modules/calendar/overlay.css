@@ -41,6 +41,19 @@
             align-items: center; gap: .5em; flex-wrap: wrap; }
 .ev .meta .loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
 
+/* Clickable rows/chips (interactive overlay only). Harmless on the ambient
+   wallpaper, which has no cursor and can't be clicked. */
+.ev[data-wp-href] { cursor: pointer; }
+.ev[data-wp-href]:hover {
+  background: rgba(120,170,255,.16);
+  border-color: rgba(120,180,255,.55);
+}
+.chip[data-wp-href] { cursor: pointer; }
+.chip[data-wp-href]:hover {
+  background: rgba(120,170,255,.24);
+  border-color: rgba(120,180,255,.5);
+}
+
 .ev.now    { background: rgba(80,150,255,.16); border-color: rgba(120,180,255,.45);
              box-shadow: 0 0 24px rgba(70,140,255,.25); }
 .ev.next   { border-color: rgba(120,180,255,.28); }
