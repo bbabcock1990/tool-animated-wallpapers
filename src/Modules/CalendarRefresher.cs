@@ -103,7 +103,7 @@ internal sealed class CalendarRefresher
         string path =
             "/me/calendarView" +
             $"?startDateTime={start}&endDateTime={end}" +
-            "&$select=subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,showAs" +
+            "&$select=subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,showAs,webLink" +
             "&$orderby=start/dateTime&$top=100";
 
         log.WriteLine("Calendar: fetching via WorkIQ (uses your existing Windows M365 sign-in)...");
@@ -272,7 +272,7 @@ internal sealed class CalendarRefresher
         string url =
             "https://graph.microsoft.com/v1.0/me/calendarView" +
             $"?startDateTime={start}&endDateTime={end}" +
-            "&$select=subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,showAs" +
+            "&$select=subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,showAs,webLink" +
             "&$orderby=start/dateTime&$top=100";
 
         using var http = new HttpClient();
@@ -319,6 +319,7 @@ internal sealed class CalendarRefresher
                 IsOnline = Bool(e, "isOnlineMeeting"),
                 Location = Nested(e, "location", "displayName"),
                 ShowAs = Str(e, "showAs"),
+                WebLink = Str(e, "webLink"),
             });
         }
         return results;
@@ -459,5 +460,6 @@ internal sealed class CalendarRefresher
         public bool IsOnline { get; set; }
         public string? Location { get; set; }
         public string? ShowAs { get; set; }
+        public string? WebLink { get; set; }
     }
 }
