@@ -10,7 +10,9 @@ namespace HtmlWallpaper;
 /// A transparent, top-most, non-activating window rendered *in front of* the desktop
 /// that hosts the same modules as the wallpaper, but is interactive: its clickable
 /// hit-region is clipped to only the module panels (everything else passes straight
-/// through to the desktop icons), and links inside a panel open in the browser.
+/// through to the desktop icons), and links inside a panel open in the browser —
+/// except Outlook calendar links, which open the "new" Outlook desktop app when it
+/// is installed (falling back to the browser otherwise).
 ///
 /// Why this exists: the wallpaper window is parented behind the desktop icons
 /// (SHELLDLL_DefView), so Windows routes every desktop click to the icon layer and the
@@ -235,11 +237,57 @@ internal sealed class InteractiveOverlayForm : Form
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)) return;
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return;
 
+        // Outlook calendar links: prefer the installed "new" Outlook desktop app
+        // (ms-outlook: — never classic Outlook), and only fall back to opening the
+        // web link in the browser when that app isn't available. The new Outlook
+        // has no supported deep link to a specific event, so it opens the app; the
+        // web fallback still lands on the exact meeting.
+        if (IsOutlookCalendarLink(uri) && TryOpenInNewOutlook())
+            return;
+
+        OpenInBrowser(uri.AbsoluteUri);
+    }
+
+    /// <summary>True for an Outlook/OWA calendar-item URL (e.g. an event's Graph webLink).</summary>
+    private static bool IsOutlookCalendarLink(Uri uri)
+    {
+        string host = uri.Host.ToLowerInvariant();
+        bool outlookHost =
+            host.EndsWith("outlook.office.com") ||
+            host.EndsWith("outlook.office365.com") ||
+            host.EndsWith("outlook.live.com");
+        if (!outlookHost) return false;
+
+        string where = (uri.AbsolutePath + " " + uri.Query).ToLowerInvariant();
+        return where.Contains("itemid") || where.Contains("/calendar");
+    }
+
+    /// <summary>
+    /// Launch the "new" Outlook for Windows via its <c>ms-outlook:</c> protocol.
+    /// Returns false (so the caller can fall back to the browser) if no handler is
+    /// registered — i.e. the new Outlook isn't installed.
+    /// </summary>
+    private static bool TryOpenInNewOutlook()
+    {
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = uri.AbsoluteUri,
+                FileName = "ms-outlook:",
+                UseShellExecute = true
+            });
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static void OpenInBrowser(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
                 UseShellExecute = true
             });
         }
