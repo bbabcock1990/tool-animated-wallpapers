@@ -104,6 +104,8 @@ internal sealed class InteractiveOverlayForm : Form
 
     private async void OnLoadAsync(object? sender, EventArgs e)
     {
+      try
+      {
         // Start with an empty hit-region so nothing is clickable until the page
         // reports where its panels are.
         SetEmptyRegion();
@@ -124,7 +126,13 @@ internal sealed class InteractiveOverlayForm : Form
         CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null, userDataFolder: userData, options: options);
 
+        // A dock/undock rebuild can close this window mid-await; bail before touching
+        // the disposed control.
+        if (IsDisposed || Disposing || _webView.IsDisposed) return;
+
         await _webView.EnsureCoreWebView2Async(env);
+
+        if (IsDisposed || Disposing || _webView.IsDisposed || _webView.CoreWebView2 is null) return;
 
         CoreWebView2 core = _webView.CoreWebView2;
         core.Settings.AreDefaultContextMenusEnabled = false;
@@ -143,6 +151,13 @@ internal sealed class InteractiveOverlayForm : Form
         Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         ApplyVisibility();
+      }
+      catch (Exception ex)
+      {
+          // Overlay is optional; a create/close race during a rebuild must never crash
+          // the process. It will be recreated by the next Build.
+          Program.Log("InteractiveOverlayForm.OnLoadAsync", ex);
+      }
     }
 
     private void Navigate(string source)
