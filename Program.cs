@@ -51,9 +51,41 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        // Safety net: keep transient failures — most importantly the WebView2
+        // create/close races that happen when a dock/undock triggers a rebuild —
+        // from tearing down the wallpaper with the .NET "Unhandled exception"
+        // dialog (Operation aborted / E_ABORT). Log them and keep running.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => Log("ThreadException", e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("UnhandledException", e.ExceptionObject as Exception);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Log("UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
         // Decide which monitors to cover, and keep them correct as displays change.
         Application.Run(new MultiFormContext(source, args));
         return 0;
+    }
+
+    /// <summary>
+    /// Append a diagnostic line to %LOCALAPPDATA%\HtmlWallpaper\wallpaper.log. Used by
+    /// the global exception handlers so a swallowed crash still leaves a trace. Must
+    /// never throw.
+    /// </summary>
+    internal static void Log(string kind, Exception? ex)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "HtmlWallpaper");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "wallpaper.log"),
+                $"{DateTime.Now:o} [{kind}] {ex}{Environment.NewLine}");
+        }
+        catch { /* logging must never crash the app */ }
     }
 
     internal static List<Rectangle> ResolveTargetScreens(string[] args)

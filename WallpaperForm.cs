@@ -60,6 +60,8 @@ internal sealed class WallpaperForm : Form
 
     private async void OnLoadAsync(object? sender, EventArgs e)
     {
+      try
+      {
         string userData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "HtmlWallpaper", "WebView2", _userDataSubfolder);
@@ -83,7 +85,13 @@ internal sealed class WallpaperForm : Form
         CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null, userDataFolder: userData, options: options);
 
+        // A dock/undock rebuild can close this window while the awaits above are in
+        // flight; touching the disposed control would throw. Bail out quietly.
+        if (IsDisposed || Disposing || _webView.IsDisposed) return;
+
         await _webView.EnsureCoreWebView2Async(env);
+
+        if (IsDisposed || Disposing || _webView.IsDisposed || _webView.CoreWebView2 is null) return;
 
         CoreWebView2 core = _webView.CoreWebView2;
         core.Settings.AreDefaultContextMenusEnabled = false;
@@ -112,6 +120,13 @@ internal sealed class WallpaperForm : Form
                 AttachToDesktop();
         };
         _watchdog.Start();
+      }
+      catch (Exception ex)
+      {
+          // Most likely a WebView2 create/close race during a display-change rebuild.
+          // The window will be recreated by the next Build; never crash the process.
+          Program.Log("WallpaperForm.OnLoadAsync", ex);
+      }
     }
 
     private void Navigate(string source)
